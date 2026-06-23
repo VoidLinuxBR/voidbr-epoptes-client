@@ -1,53 +1,50 @@
-# Maintainer: Vilmar Catafesta <vcatafesta@gmail.com>
+# Maintainer : Eduardo Charquero <eduardo.charquero@gmail.com>
 
-pkgname=voidbr-pkgname
-pkgdesc="Package template for VoidLinuxBR"
+pkgname=epoptes-client
 pkgver=$(date +%Y%m%d)
 pkgrel=$(date +%H%M)
-provides=()
-replaces=()
-arch=('any')
-license=('MIT')
-#url="ssh://git@github.com/voidlinuxbr/${pkgname}"
-url="https://github.com/voidlinuxbr/${pkgname}"
-source=("git+${url}.git")
-md5sums=('SKIP')
-makedepends=()
-depends=()
-
-# Automatically detect and use the correct install file
-if [ -e "${pkgname}.install" ]; then
-	install=${pkgname}.install
-elif [ -e "pkgbuild.install" ]; then
-	install=pkgfile.install
-fi
+pkgdesc='An opensource computer lab management and monitoring tool'
+makedepends=(git python3-distutils-extra intltool)
+url="https://github.com/voidlinuxbr/$pkgname"
+#source=("git+${url}.git")
+license=(GPL3)
+arch=(any)
+sha256sums=('SKIP')
+depends=(gobject-introspection
+	gtk+3
+	iperf
+	iproute2
+	faketime
+	libnotify
+	librsvg
+	notification-daemon
+	openssl
+	python3-cairo
+	python3-dbus
+	python3-gobject
+	python3-netifaces
+	python3-openssl
+	python3-service_identity
+	python3-Twisted
+	socat
+	tigervnc
+	x11vnc
+	xterm)
+optdepends=('xfce4-notifyd: XFCE notification support')
 
 package() {
-	# Verify default folder
-	if [ -d "${srcdir}/${pkgname}/${pkgname}" ]; then
-		InternalDir="${srcdir}/${pkgname}/${pkgname}"
-	else
-		InternalDir="${srcdir}/${pkgname}"
-	fi
+	local dirs=("usr" "etc" "opt")
+	#   echo "DESTDIR=$DESTDIR"
+	#   echo "pkgdir=$pkgdir"
+	#   echo "srcdir=$srcdir"
+	#   echo "_pkgsrc=$_pkgsrc"
 
-	cd "${srcdir}/${pkgname}"
-	# Copiar a estrutura de /etc, /usr e /opt para /
-	local dirs=("boot" "etc" "opt" "usr")
+	cd ${srcdir}/${pkgname}
 	for dir in "${dirs[@]}"; do
-		if [ -d "${InternalDir}/${dir}" ]; then
-			cp -a "${InternalDir}/${dir}" "${pkgdir}/"
+		if [ -d "${_pkgsrc}/${dir}" ]; then
+			cp -a "${_pkgsrc}/${dir}" "$DESTDIR/"
 		fi
 	done
-
-	# Install license file if present
-	if [ -f "LICENSE" ]; then
-		install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
-	fi
-
-	# Install documentation if present
-	if [ -f "README.md" ]; then
-		install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
-	fi
 }
 
 pre_install() {
@@ -55,7 +52,35 @@ pre_install() {
 }
 
 post_install() {
-	log "Finalizando instalação"
+	if getent group epoptes; then
+		echo "Group 'epoptes' already exists. Skipping group's creation."
+	else
+		groupadd epoptes || true
+		echo "Group 'epoptes' has been added."
+	fi
+
+	mkdir -p /etc/epoptes/ || true
+	if ! [ -s /etc/epoptes/server.key ] || ! [ -s /etc/epoptes/server.crt ]; then
+		faketime '1970-01-01 00:00:00 UTC' \
+			openssl req -batch -x509 -nodes \
+			-newkey rsa:4096 -days $(($(date --utc +%s) / 86400 + 3652)) \
+			-keyout /etc/epoptes/server.key -out /etc/epoptes/server.crt
+		chmod 600 /etc/epoptes/server.key
+	fi
+
+  sed -i 's/import pipes/import shlex/' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py
+  sed -i 's/pipes\.quote/shlex.quote/g' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py
+
+  ln -sf /etc/sv/epoptes-client /var/service/
+
+	echo "${RED}The installation has finished. Please bare in mind you'll have to do the following before using Epoptes:"
+	echo "1.- You will have to add yourself to the 'epoptes' group."
+	echo "2.- You will have to run as root:"
+	echo "    'systemctl enable epoptes' to enable the Epoptes server daemon."
+	echo "3.- You may need to restart your system for everything to work."
+	echo "4.- If you don't want to restart your system, then [after doing all of the above] you will have to run as root:"
+	echo "    'systemctl start epoptes' to start the Epoptes server daemon."
+	echo "After all this you still have to log out and then log back in and now Epoptes should work without a problem.${RESET}"
 }
 
 pre_upgrade() {

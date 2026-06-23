@@ -1,3 +1,3 @@
-# voidbr-pkgfile
+# voidbr-epoptes-client
 
-Template for VoidBR pkgmake/pkgfile packages
+An opensource computer lab management and monitoring tool - CLIENT
