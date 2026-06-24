@@ -1,4 +1,5 @@
 #!/bin/sh
 exec 2>&1
 
+exec epoptes-client -c &
 exec epoptes-client
