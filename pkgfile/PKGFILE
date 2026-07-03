@@ -32,6 +32,7 @@ depends=(gobject-introspection
 	x11vnc
 	xterm)
 optdepends=('xfce4-notifyd: XFCE notification support')
+backup=(/etc/default/epoptes-client)
 
 package() {
 	local dirs=("usr" "etc" "opt")
