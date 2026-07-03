@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Maintainer : Eduardo Charquero <eduardo.charquero@gmail.com>
 
 pkgname=epoptes-client
@@ -52,35 +53,36 @@ pre_install() {
 }
 
 post_install() {
-	if getent group epoptes; then
-		echo "Group 'epoptes' already exists. Skipping group's creation."
-	else
-		groupadd epoptes || true
-		echo "Group 'epoptes' has been added."
-	fi
+  pkgname="epoptes-client"
+  if ! getent group epoptes >/dev/null; then
+    groupadd epoptes >/dev/null || true
+    echo "Group 'epoptes' has been added."
+  fi
+  usermod -aG epoptes "$user" >/dev/null || true
 
-	mkdir -p /etc/epoptes/ || true
-	if ! [ -s /etc/epoptes/server.key ] || ! [ -s /etc/epoptes/server.crt ]; then
-		faketime '1970-01-01 00:00:00 UTC' \
-			openssl req -batch -x509 -nodes \
-			-newkey rsa:4096 -days $(($(date --utc +%s) / 86400 + 3652)) \
-			-keyout /etc/epoptes/server.key -out /etc/epoptes/server.crt
-		chmod 600 /etc/epoptes/server.key
-	fi
+  mkdir -p /etc/epoptes/ >/dev/null|| true
+  if ! [ -s /etc/epoptes/server.key ] || ! [ -s /etc/epoptes/server.crt ]; then
+    faketime '1970-01-01 00:00:00 UTC' \
+      openssl req -batch -x509 -nodes \
+      -newkey rsa:4096 -days $(($(date --utc +%s) / 86400 + 3652)) \
+      -keyout /etc/epoptes/server.key -out /etc/epoptes/server.crt
+    chmod 600 /etc/epoptes/server.key
+  fi
 
-  sed -i 's/import pipes/import shlex/' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-  sed -i 's/pipes\.quote/shlex.quote/g' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py
+  sed -i 's/import pipes/import shlex/' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py || true
+  sed -i 's/pipes\.quote/shlex.quote/g' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py || true
 
-  ln -sf /etc/sv/epoptes-client /var/service/
+  ln -sf /etc/sv/epoptes /var/service/ >/dev/null || true
 
-	echo "${RED}The installation has finished. Please bare in mind you'll have to do the following before using Epoptes:"
-	echo "1.- You will have to add yourself to the 'epoptes' group."
-	echo "2.- You will have to run as root:"
-	echo "    'systemctl enable epoptes' to enable the Epoptes server daemon."
-	echo "3.- You may need to restart your system for everything to work."
-	echo "4.- If you don't want to restart your system, then [after doing all of the above] you will have to run as root:"
-	echo "    'systemctl start epoptes' to start the Epoptes server daemon."
-	echo "After all this you still have to log out and then log back in and now Epoptes should work without a problem.${RESET}"
+  log "A instalação foi concluída. Antes de utilizar o Epoptes, lembre-se de fazer o seguinte:"
+  log "1.- Você deverá adicionar seu usuário ao grupo 'epoptes' - ${YELLOW}sudo usermod -aG epoptes $user"
+  log "2.- Você deverá executar como root:"
+  log "    ${YELLOW}'vservice enable epoptes-client' ${CYAN}para habilitar o serviço de cliente Epoptes."
+  log "3.- Pode ser necessário reiniciar o sistema para que tudo funcione corretamente."
+  log "4.- Se não quiser reiniciar o sistema, após realizar todos os passos acima, execute como root:"
+  log "    ${YELLOW}'vservice start epoptes-client' ${CYAN}para iniciar o serviço do cliente Epoptes."
+  log "Após concluir tudo isso, você ainda precisará encerrar a sessão e entrar novamente."
+  log "Feito isso, o Epoptes deverá funcionar normalmente.${RESET}"
 }
 
 pre_upgrade() {

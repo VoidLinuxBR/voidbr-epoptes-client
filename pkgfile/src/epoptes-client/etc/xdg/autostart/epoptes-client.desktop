@@ -7,5 +7,5 @@ Exec=/usr/sbin/epoptes-client
 Icon=epoptes
 Terminal=false
 Type=Application
-Categories=Settings;System;
+Categories=Settings;System;X-VoidBR-Apps;
 # X-GNOME-AutoRestart=true
