@@ -30,8 +30,8 @@ depends=(gobject-introspection
 	socat
 	tigervnc
 	x11vnc
-	xterm)
-optdepends=('xfce4-notifyd: XFCE notification support')
+	xterm
+)
 backup=(/etc/default/epoptes-client)
 
 package() {
