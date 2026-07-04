@@ -5,6 +5,7 @@ pkgname=voidbr-epoptes-client
 pkgver=$(date +%Y%m%d)
 pkgrel=$(date +%H%M)
 pkgdesc='An opensource computer lab management and monitoring tool'
+replaces=(epoptes-client)
 makedepends=(git python3-distutils-extra intltool)
 url="https://github.com/voidlinuxbr/$pkgname"
 source=("git+${url}.git")
