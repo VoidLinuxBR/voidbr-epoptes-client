@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Maintainer : Eduardo Charquero <eduardo.charquero@gmail.com>
 
+_pkgbase=voidbr-epoptes-client
 pkgname=epoptes-client
 pkgver=$(date +%Y%m%d)
 pkgrel=$(date +%H%M)
 pkgdesc='An opensource computer lab management and monitoring tool'
 makedepends=(git python3-distutils-extra intltool)
-url="https://github.com/voidlinuxbr/$pkgname"
+url="https://github.com/voidlinuxbr/$_pkgbase"
 source=("git+${url}.git")
 license=(GPL3)
 arch=(any)
