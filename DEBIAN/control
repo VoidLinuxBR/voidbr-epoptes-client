@@ -1,0 +1,15 @@
+Package: epoptes-client
+Version: 23.01-2
+Section: admin
+Priority: optional
+Architecture: all
+Maintainer: Vilmar Catafesta <vcatafesta@gmail.com>
+Homepage: https://github.com/Epoptes/epoptes
+Depends: ethtool, iperf3, iproute2, libnotify-bin, openssl, procps, python3, python3-cairo, python3-gi, python3-twisted, screen, socat, tigervnc-standalone-server | tigervnc-common, x11vnc, xterm
+Suggests: cups, sane, xfce4-notifyd
+Description: Epoptes client
+  Epoptes is an open source computer lab management and monitoring tool.
+  .
+  This package provides the client component, allowing a workstation to be
+  managed remotely by an Epoptes server. It includes the services and tools
+  required for classroom management, remote assistance and monitoring.
