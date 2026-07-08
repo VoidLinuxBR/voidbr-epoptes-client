@@ -60,21 +60,12 @@ post_install() {
     groupadd epoptes >/dev/null || true
     echo "Group 'epoptes' has been added."
   fi
+
   usermod -aG epoptes "$user" >/dev/null || true
-
-  mkdir -p /etc/epoptes/ >/dev/null|| true
-  if ! [ -s /etc/epoptes/server.key ] || ! [ -s /etc/epoptes/server.crt ]; then
-    faketime '1970-01-01 00:00:00 UTC' \
-      openssl req -batch -x509 -nodes \
-      -newkey rsa:4096 -days $(($(date --utc +%s) / 86400 + 3652)) \
-      -keyout /etc/epoptes/server.key -out /etc/epoptes/server.crt
-    chmod 600 /etc/epoptes/server.key
-  fi
-
+  mkdir -p /etc/epoptes/ >/dev/null || true
   sed -i 's/import pipes/import shlex/' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py || true
   sed -i 's/pipes\.quote/shlex.quote/g' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py || true
-
-  ln -sf /etc/sv/epoptes /var/service/ >/dev/null || true
+  ln -sf /etc/sv/epoptes-client /var/service/ >/dev/null || true
 
   log "A instalação foi concluída. Antes de utilizar o Epoptes, lembre-se de fazer o seguinte:"
   log "1.- Você deverá adicionar seu usuário ao grupo 'epoptes' - ${YELLOW}sudo usermod -aG epoptes $user"
