@@ -223,7 +223,7 @@ index 557829c..d68076a 100755
  
  def main():
 diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
-index d54ba3b..df8a36a 100644
+index d54ba3b..e7e657c 100644
 --- a/usr/share/epoptes/client-functions
 +++ b/usr/share/epoptes/client-functions
 @@ -260,9 +260,11 @@ shutdown() {
@@ -239,7 +239,7 @@ index d54ba3b..df8a36a 100644
      if [ -f "./thumbshot.py" ]; then
          executable=./thumbshot.py
      else
-@@ -378,11 +380,62 @@ message() {
+@@ -378,11 +380,68 @@ message() {
      fi
  }
  
@@ -275,10 +275,16 @@ index d54ba3b..df8a36a 100644
 +        return 1
 +    fi
 +
++    # -R (--disable-resizing): impede o wayvnc de tentar redimensionar
++    # a saida automaticamente para bater com o cliente VNC. Em placas
++    # mais antigas (driver "radeon", por exemplo) o kernel pode recusar
++    # esse modo customizado ("[drm] User-defined mode not supported"),
++    # o que derruba a saida no meio da sessao ("Selected output ...
++    # went away" no log do wayvnc).
 +    if [ "$mode" = viewonly ]; then
-+        wpid=$(background -p wayvnc -d 127.0.0.1 "$wport")
++        wpid=$(background -p wayvnc -d -R 127.0.0.1 "$wport")
 +    else
-+        wpid=$(background -p wayvnc 127.0.0.1 "$wport")
++        wpid=$(background -p wayvnc -R 127.0.0.1 "$wport")
 +    fi
 +
 +    # Da um tempo pro wayvnc comecar a escutar antes do socat tentar.
@@ -303,7 +309,7 @@ index d54ba3b..df8a36a 100644
  }
  
  # Connect to the server to get assistance.
-@@ -390,7 +443,11 @@ get_monitored() {
+@@ -390,7 +449,11 @@ get_monitored() {
  # $1 = host:port.
  # $2 = grab keyboard and mouse.
  get_assisted() {
@@ -316,7 +322,7 @@ index d54ba3b..df8a36a 100644
  }
  
  # Deactivate the screensaver, in order for the users to watch a broadcast.
-@@ -468,7 +525,7 @@ receive_broadcast() {
+@@ -468,7 +531,7 @@ receive_broadcast() {
  # The vnc clients should automatically exit when the server is killed.
  # Unfortunately, that isn't always true, so try to kill them anyway.
  stop_receptions() {
@@ -325,7 +331,7 @@ index d54ba3b..df8a36a 100644
  
      unset receiving_broadcast
      ensure_display
-@@ -477,6 +534,11 @@ stop_receptions() {
+@@ -477,6 +540,11 @@ stop_receptions() {
          kill "$pid"
          xprop_unset EPOPTES_VNCVIEWER_PID
      fi
