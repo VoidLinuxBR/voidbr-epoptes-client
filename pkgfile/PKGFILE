@@ -15,13 +15,15 @@ license=(GPL3)
 arch=(any)
 sha256sums=(
 	'SKIP'
-	'5ac927bbdcc0c5f9839f6d7004ec45ef5f736c2a2a7bfad016b2276d529b4818'
+	'753fa9014dc52b52aa07170a1e60281e70f2c83e15ce2675b31407ac7d17f446'
 )
 depends=(gobject-introspection
+	grim
 	gtk+3
 	iperf
 	iproute2
 	faketime
+	kde-cli-tools
 	libnotify
 	librsvg
 	notification-daemon
@@ -36,18 +38,17 @@ depends=(gobject-introspection
 	python3-Twisted
 	socat
 	tigervnc
+	wayvnc
 	x11vnc
 	xterm
-  # grim   -> thumbshots em Hyprland/Sway/river/labwc (wlroots)
-  # wayvnc -> observar/assistir (duplo-clique) em Hyprland/Sway/wlroots
-  # kde-cli-tools (spectacle) -> thumbshots em KDE Plasma Wayland
-  # GNOME nao precisa de pacote extra: usa gdbus, que ja vem com glib
-  # (dependencia transitiva de gtk+3).
-  grim
-  wayvnc
-  kde-cli-tools
 )
-
+# grim   -> thumbshots em Hyprland/Sway/river/labwc (wlroots)
+# wayvnc -> observar/assistir (duplo-clique) em Hyprland/Sway/wlroots
+# kde-cli-tools (spectacle) -> thumbshots em KDE Plasma Wayland
+# GNOME nao precisa de pacote extra: usa gdbus, que ja vem com glib
+# (dependencia transitiva de gtk+3). Void/xbps nao tem optdepends, entao
+# esses ficam como dependencia obrigatoria mesmo, ainda que so facam
+# sentido em alguns ambientes.
 backup=(/etc/default/epoptes-client)
 
 prepare() {

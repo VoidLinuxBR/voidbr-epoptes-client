@@ -201,7 +201,7 @@ index 557829c..d68076a 100755
  
  def main():
 diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
-index d54ba3b..df8a36a 100644
+index d54ba3b..31121b0 100644
 --- a/usr/share/epoptes/client-functions
 +++ b/usr/share/epoptes/client-functions
 @@ -260,9 +260,11 @@ shutdown() {
@@ -254,9 +254,9 @@ index d54ba3b..df8a36a 100644
 +    fi
 +
 +    if [ "$mode" = viewonly ]; then
-+        wpid=$(background -p wayvnc -d 127.0.0.1 "$wport")
++        wpid=$(background -p wayvnc -d "127.0.0.1:$wport")
 +    else
-+        wpid=$(background -p wayvnc 127.0.0.1 "$wport")
++        wpid=$(background -p wayvnc "127.0.0.1:$wport")
 +    fi
 +
 +    # Da um tempo pro wayvnc comecar a escutar antes do socat tentar.

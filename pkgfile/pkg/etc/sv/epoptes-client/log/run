@@ -1,0 +1,3 @@
+#!/bin/sh
+mkdir -p /var/log/epoptes-client
+exec svlogd -tt /var/log/epoptes-client
