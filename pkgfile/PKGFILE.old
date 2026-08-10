@@ -1,22 +1,17 @@
+#!/usr/bin/env bash
 # Maintainer : Eduardo Charquero <eduardo.charquero@gmail.com>
 
 pkgname=voidbr-epoptes-client
 pkgver=$(date +%Y%m%d)
 pkgrel=$(date +%H%M)
-pkgdesc='An opensource computer lab management and monitoring tool (com suporte a thumbshots em Wayland: Hyprland/wlroots, GNOME, KDE Plasma)'
+pkgdesc='An opensource computer lab management and monitoring tool'
 replaces=(epoptes-client)
-makedepends=(git python3-distutils-extra intltool patch)
+makedepends=(git python3-distutils-extra intltool)
 url="https://github.com/voidlinuxbr/$pkgname"
-source=(
-	"git+${url}.git"
-	"wayland-thumbshot.patch"
-)
+source=("git+${url}.git")
 license=(GPL3)
 arch=(any)
-sha256sums=(
-	'SKIP'
-	'5ac927bbdcc0c5f9839f6d7004ec45ef5f736c2a2a7bfad016b2276d529b4818'
-)
+sha256sums=('SKIP')
 depends=(gobject-introspection
 	gtk+3
 	iperf
@@ -31,35 +26,14 @@ depends=(gobject-introspection
 	python3-gobject
 	python3-netifaces
 	python3-openssl
-	python3-Pillow
 	python3-service_identity
 	python3-Twisted
 	socat
 	tigervnc
 	x11vnc
 	xterm
-  # grim   -> thumbshots em Hyprland/Sway/river/labwc (wlroots)
-  # wayvnc -> observar/assistir (duplo-clique) em Hyprland/Sway/wlroots
-  # kde-cli-tools (spectacle) -> thumbshots em KDE Plasma Wayland
-  # GNOME nao precisa de pacote extra: usa gdbus, que ja vem com glib
-  # (dependencia transitiva de gtk+3).
-  grim
-  wayvnc
-  kde-cli-tools
 )
-
 backup=(/etc/default/epoptes-client)
-
-prepare() {
-	cd "${srcdir}/${pkgname}"
-	# VoidBR patch: suporte a Wayland (Hyprland/wlroots, GNOME, KDE Plasma)
-	# - thumbshots: grim (wlroots) / gdbus+Shell.Screenshot (GNOME) /
-	#   spectacle (KDE). O caminho X11 original permanece intocado.
-	# - observar/assistir (duplo-clique): wayvnc + socat fazendo o papel
-	#   de "conexao reversa" que o wayvnc nao tem nativamente (so
-	#   funciona em Hyprland/Sway/wlroots; sem efeito em GNOME/KDE ainda).
-	patch -p1 < "${srcdir}/wayland-thumbshot.patch"
-}
 
 package() {
 	local dirs=("usr" "etc" "opt")
@@ -67,6 +41,7 @@ package() {
 	#   echo "pkgdir=$pkgdir"
 	#   echo "srcdir=$srcdir"
 	#   echo "_pkgsrc=$_pkgsrc"
+
 	cd ${srcdir}/${pkgname}
 	for dir in "${dirs[@]}"; do
 		if [ -d "${_pkgsrc}/${dir}" ]; then
@@ -74,20 +49,24 @@ package() {
 		fi
 	done
 }
+
 pre_install() {
 	log "Iniciando instalação"
 }
+
 post_install() {
   pkgname="epoptes-client"
   if ! getent group epoptes >/dev/null; then
     groupadd epoptes >/dev/null || true
     echo "Group 'epoptes' has been added."
   fi
+
   usermod -aG epoptes "$user" >/dev/null || true
   mkdir -p /etc/epoptes/ >/dev/null || true
   sed -i 's/import pipes/import shlex/' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py || true
   sed -i 's/pipes\.quote/shlex.quote/g' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py || true
   ln -sf /etc/sv/epoptes-client /var/service/ >/dev/null || true
+
   log "A instalação foi concluída. Antes de utilizar o Epoptes, lembre-se de fazer o seguinte:"
   log "1.- Você deverá adicionar seu usuário ao grupo 'epoptes' - ${YELLOW}sudo usermod -aG epoptes $user"
   log "2.- Você deverá executar como root:"
@@ -97,14 +76,12 @@ post_install() {
   log "    ${YELLOW}'vservice start epoptes-client' ${CYAN}para iniciar o serviço do cliente Epoptes."
   log "Após concluir tudo isso, você ainda precisará encerrar a sessão e entrar novamente."
   log "Feito isso, o Epoptes deverá funcionar normalmente.${RESET}"
-  log "Thumbshots em Wayland: em Hyprland/Sway instale o pacote 'grim'; em KDE"
-  log "Plasma instale 'kde-cli-tools' (spectacle). GNOME nao precisa de nada extra."
-  log "Observar/assistir clientes (duplo-clique) em Wayland: so funciona em"
-  log "Hyprland/Sway por enquanto, instale o pacote 'wayvnc'."
 }
+
 pre_upgrade() {
 	log "Iniciando upgrade"
 }
+
 post_upgrade() {
 	log "Finalizando upgrade"
 }
