@@ -9,13 +9,13 @@ makedepends=(git python3-distutils-extra intltool patch)
 url="https://github.com/voidlinuxbr/$pkgname"
 source=(
 	"git+${url}.git"
-	"wayland-thumbshot.patch"
+	"voidbr-epoptes-client.patch"
 )
 license=(GPL3)
 arch=(any)
 sha256sums=(
 	'SKIP'
-	'753fa9014dc52b52aa07170a1e60281e70f2c83e15ce2675b31407ac7d17f446'
+	'3c34317a25eb345fb8f4789cf939b3dec79d60ff6db957c360db5c637f1fe2b4'
 )
 depends=(gobject-introspection
 	grim
@@ -59,7 +59,8 @@ prepare() {
 	# - observar/assistir (duplo-clique): wayvnc + socat fazendo o papel
 	#   de "conexao reversa" que o wayvnc nao tem nativamente (so
 	#   funciona em Hyprland/Sway/wlroots; sem efeito em GNOME/KDE ainda).
-	patch -p1 < "${srcdir}/wayland-thumbshot.patch"
+	# - gui.py: fix Python 3.14 (modulo "pipes" removido, virou "shlex").
+	patch -p1 < "${srcdir}/voidbr-epoptes-client.patch"
 }
 
 package() {
@@ -86,8 +87,6 @@ post_install() {
   fi
   usermod -aG epoptes "$user" >/dev/null || true
   mkdir -p /etc/epoptes/ >/dev/null || true
-  sed -i 's/import pipes/import shlex/' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py || true
-  sed -i 's/pipes\.quote/shlex.quote/g' /usr/lib/python3.14/site-packages/epoptes/ui/gui.py || true
   ln -sf /etc/sv/epoptes-client /var/service/ >/dev/null || true
   log "A instalação foi concluída. Antes de utilizar o Epoptes, lembre-se de fazer o seguinte:"
   log "1.- Você deverá adicionar seu usuário ao grupo 'epoptes' - ${YELLOW}sudo usermod -aG epoptes $user"
