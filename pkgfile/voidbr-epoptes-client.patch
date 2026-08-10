@@ -1,8 +1,20 @@
 diff --git a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-index 720c958..b133d32 100644
+index 720c958..381eec1 100644
 --- a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 +++ b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-@@ -7,7 +7,7 @@ Epoptes GUI class.
+@@ -4,10 +4,19 @@
+ # SPDX-License-Identifier: GPL-3.0-or-later
+ """
+ Epoptes GUI class.
++
++PATCH (VoidBR):
++  1. "import pipes" -> "import shlex" / pipes.quote -> shlex.quote.
++     O modulo "pipes" foi removido no Python 3.13 (shlex.quote e o
++     substituto direto, mesma assinatura).
++  2. reverse_connection(): usado por "Observar"/"Assistir" (duplo-
++     clique). Ver comentario na propria funcao para o detalhe do bug
++     que isso corrige (vncviewer -listen que fica "vivo" mas para de
++     aceitar novas sessoes RFB).
  """
  from distutils.version import LooseVersion
  import os
@@ -11,7 +23,89 @@ index 720c958..b133d32 100644
  import random
  import socket
  import string
-@@ -1059,7 +1059,7 @@ class EpoptesGui(object):
+@@ -276,39 +285,52 @@ class EpoptesGui(object):
+ 
+     def reverse_connection(self, cmd, *args):
+         """Helper function for on_imi_broadcasts_*_activate."""
+-        # Open vncviewer in listen mode
+-        if self.vncviewer is None or self.vncviewer.poll() is not None:
+-            self.vncviewer_port = self.find_unused_port()
+-            if os.path.isfile('/usr/share/applications/realvnc-vncviewer.desktop'):
+-                viewer = 'realvnc-vnc-viewer'
+-            elif os.path.isfile('/usr/bin/ssvncviewer'):
+-                viewer = 'ssvncviewer'
+-            else:
+-                viewer = os.path.realpath('/usr/bin/vncviewer')
+-                viewer = os.path.basename(viewer)
+-            if viewer == 'realvnc-vnc-viewer':
+-                scmd = ['vncviewer', '-uselocalcursor=0', '-scaling=aspectfit',
+-                       '-securitynotificationtimeout=0', '-warnunencrypted=0',
+-                       '-enabletoolbar=0', '-listen', str(self.vncviewer_port)]
+-            elif viewer == 'ssvncviewer':
+-                scmd = ['ssvncviewer', '-scale', 'auto', '-multilisten',
+-                       str(self.vncviewer_port-5500)]
+-            elif viewer == 'xtigervncviewer':
+-                scmd = ['xtigervncviewer', '-listen', str(self.vncviewer_port)]
+-            elif viewer == 'xtightvncviewer':
+-                scmd = ['xtightvncviewer', '-listen',
+-                       str(self.vncviewer_port-5500)]
+-            elif viewer == 'xvnc4viewer':
+-                scmd = ['xvnc4viewer',  '-uselocalcursor=0', '-listen',
+-                       str(self.vncviewer_port)]
+-            else:
+-                # A generic vncviewer, e.g. tigervnc on Arch/Fedora/SUSE
+-                scmd = ['vncviewer', '-listen', str(self.vncviewer_port)]
+-            self.vncviewer = subprocess.Popen(scmd)
++        # VoidBR fix: o TigerVNC (-listen) as vezes fica "vivo" (processo
++        # nao sai sozinho) mas para de aceitar novas sessoes RFB depois
++        # que a primeira termina. Confiar em self.vncviewer.poll() pra
++        # decidir se reaproveita o listener antigo faz a segunda
++        # tentativa de observar sempre falhar com "connection dropped
++        # by the server before the session could be established".
++        # Por isso agora sempre encerramos o anterior e subimos um novo.
++        if self.vncviewer is not None and self.vncviewer.poll() is None:
++            self.vncviewer.terminate()
++            try:
++                self.vncviewer.wait(timeout=2)
++            except subprocess.TimeoutExpired:
++                self.vncviewer.kill()
++
++        self.vncviewer_port = self.find_unused_port()
++        if os.path.isfile('/usr/share/applications/realvnc-vncviewer.desktop'):
++            viewer = 'realvnc-vnc-viewer'
++        elif os.path.isfile('/usr/bin/ssvncviewer'):
++            viewer = 'ssvncviewer'
++        else:
++            viewer = os.path.realpath('/usr/bin/vncviewer')
++            viewer = os.path.basename(viewer)
++        if viewer == 'realvnc-vnc-viewer':
++            scmd = ['vncviewer', '-uselocalcursor=0', '-scaling=aspectfit',
++                   '-securitynotificationtimeout=0', '-warnunencrypted=0',
++                   '-enabletoolbar=0', '-listen', str(self.vncviewer_port)]
++        elif viewer == 'ssvncviewer':
++            scmd = ['ssvncviewer', '-scale', 'auto', '-multilisten',
++                   str(self.vncviewer_port-5500)]
++        elif viewer == 'xtigervncviewer':
++            scmd = ['xtigervncviewer', '-listen', str(self.vncviewer_port)]
++        elif viewer == 'xtightvncviewer':
++            scmd = ['xtightvncviewer', '-listen',
++                   str(self.vncviewer_port-5500)]
++        elif viewer == 'xvnc4viewer':
++            scmd = ['xvnc4viewer',  '-uselocalcursor=0', '-listen',
++                   str(self.vncviewer_port)]
++        else:
++            # A generic vncviewer, e.g. tigervnc on Arch/Fedora/SUSE
++            scmd = ['vncviewer', '-listen', str(self.vncviewer_port)]
++        self.vncviewer = subprocess.Popen(scmd)
+ 
+         # And, tell the clients to connect to the server
+         self.exec_on_selected_clients(' '.join([cmd, '"${GUI_IP}:%d"' % self.vncviewer_port] + list(args)))
+ 
++
+     def on_imi_broadcasts_monitor_user_activate(self, _widget):
+         """Handle imi_sbroadcasts_monitor_user.activate event."""
+         self.reverse_connection('get_monitored')
+@@ -1059,7 +1081,7 @@ class EpoptesGui(object):
          # ${GUI_PY} must be unquoted, don't pass it as list
          if isinstance(command, list) and len(command) > 0:
              command = '%s %s' % (command[0], ' '.join(
@@ -21,19 +115,35 @@ index 720c958..b133d32 100644
          if (clients != [] or handles != []) and warning != '':
              if not self.confirmation_dialog(warning):
 diff --git a/usr/share/epoptes-client/thumbshot.py b/usr/share/epoptes-client/thumbshot.py
-index 557829c..d68076a 100755
+index 557829c..9c11049 100755
 --- a/usr/share/epoptes-client/thumbshot.py
 +++ b/usr/share/epoptes-client/thumbshot.py
-@@ -4,38 +4,188 @@
+@@ -4,38 +4,204 @@
  # SPDX-License-Identifier: GPL-3.0-or-later
  """
  Create a thumbshot of the current screen.
 +
-+PATCH (VoidBR): adiciona suporte a Wayland (Hyprland/wlroots, GNOME, KDE
-+Plasma), mantendo o mesmo protocolo de saida que o epoptes original usa
-+sobre X11 (cabecalho "rowstride\nWxH\n" + pixels RGB de 8 bits, sem alpha,
-+linhas alinhadas a 4 bytes) para nao quebrar a compatibilidade com o
-+servidor (epoptes/ui/gui.py le exatamente esse formato).
++PATCH (VoidBR): adiciona suporte a Wayland, mantendo o mesmo protocolo
++de saida que o epoptes original usa sobre X11 (cabecalho
++"rowstride\nWxH\n" + pixels RGB de 8 bits, sem alpha, linhas alinhadas
++a 4 bytes) para nao quebrar a compatibilidade com o servidor
++(epoptes/ui/gui.py le exatamente esse formato via
++GdkPixbuf.Pixbuf.new_from_bytes(..., Colorspace.RGB, has_alpha=False, 8, ...)).
++
++Metodo de captura por ambiente (deteccao automatica, com fallback):
++  - wlroots (Hyprland, Sway, river, labwc...): grim, via protocolo
++    wlr-screencopy. Detectado como padrao quando XDG_CURRENT_DESKTOP
++    nao indica GNOME nem KDE.
++  - GNOME: gdbus call em org.gnome.Shell.Screenshot (interface D-Bus
++    privada do Shell, nao o portal sandboxed - por isso nao pede
++    permissao a cada chamada).
++  - KDE Plasma: spectacle -b -n -o <arquivo> (modo background, fala
++    com o KWin internamente).
++
++Em X11 (WAYLAND_DISPLAY nao definido), o caminho original via
++cairo/Gdk.get_default_root_window() continua exatamente igual, sem
++nenhuma alteracao - so importa PIL/cairo/Gdk quando realmente precisa
++de cada um, entao uma maquina X11 sem Pillow instalado nao quebra.
  """
  import os
 +import shutil
@@ -223,10 +333,95 @@ index 557829c..d68076a 100755
  
  def main():
 diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
-index d54ba3b..e7e657c 100644
+index d54ba3b..3af05f1 100644
 --- a/usr/share/epoptes/client-functions
 +++ b/usr/share/epoptes/client-functions
-@@ -260,9 +260,11 @@ shutdown() {
+@@ -6,6 +6,45 @@
+ # Implements the client side of the epoptes communications protocol.
+ # The daemon reads this file when it starts, and sends it to clients when they
+ # connect. The clients actually source it and then wait for further commands.
++#
++# ============================================================================
++# VoidBR patch - resumo das mudancas (ver comentarios inline em cada funcao
++# para o detalhe de cada uma):
++#
++# 1. thumbshot(): removido o bypass que pulava a captura inteira quando
++#    $WAYLAND_DISPLAY estava definido. A captura em si (grim/gdbus/
++#    spectacle conforme o compositor) fica no thumbshot.py, que roda
++#    localmente no cliente - aqui so precisava parar de pular a chamada.
++#
++# 2. wayland_reverse_vnc() (nova) + get_monitored()/get_assisted():
++#    "Observar"/"Assistir" (duplo-clique) usavam x11vnc -connect_or_exit,
++#    que nao existe em Wayland. wayvnc e o equivalente pra compositores
++#    wlroots (Hyprland/Sway), mas so sabe ESCUTAR - nao tem modo de
++#    conectar pra fora. O socat faz essa ponte: disca pro servidor
++#    (a "conexao reversa" que o Epoptes espera) e repassa os bytes pro
++#    wayvnc, que fica escutando so em localhost. Detalhes:
++#      -d            desliga input remoto (so no modo "observar")
++#      -R            desliga o auto-resize do wayvnc; em placas mais
++#                    antigas (driver "radeon", por ex.) o kernel recusa
++#                    o modo customizado que isso gera ("[drm] User-
++#                    defined mode not supported"), derrubando a saida
++#                    no meio da sessao.
++#      host e porta  tem que ir como argumentos SEPARADOS pro wayvnc
++#                    ("host porta", nao "host:porta" numa string so).
++#    So funciona em Hyprland/Sway/wlroots do lado do cliente por
++#    enquanto - GNOME e KDE nao tem equivalente direto ao wayvnc ainda.
++#
++# 3. stop_receptions(): agora tambem mata o processo wayvnc (via
++#    EPOPTES_WAYVNC_PID), alem do que ja matava antes (VNCVIEWER_PID,
++#    que agora e o PID do socat do relay).
++#
++# 4. info(): a deteccao de rota/IP local (ip route get) morria com
++#    "die" na primeira falha, sem retry - diferente da resolucao de
++#    DNS (wait_for_dns(), que ja tinha esse cuidado). Em boot frio,
++#    se o autostart do compositor dispara antes da rede terminar de
++#    subir, isso matava o processo de sessao pra sempre (nao volta
++#    sozinho). Agora tenta por ate ~15 segundos antes de desistir.
++# ============================================================================
+ 
+ # Dash handles signals a bit differently from bash.
+ # We need to trap both 0 and 15 otherwise the trap function isn't called at all.
+@@ -139,14 +178,32 @@ info() {
+         else
+             server_ip=$(getent hosts "$SERVER" | awk '{ print $1; exit }')
+             server_ip=${server_ip:-$SERVER}
+-            read -r def_iface IP <<EOF
+-$(ip route get "$server_ip" | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
++
++            # VoidBR patch: em boot frio, a rede (rota padrao/DHCP) pode
++            # ainda nao estar de pe quando esta funcao roda pela primeira
++            # vez (ex: autostart do compositor disparando antes da rede
++            # terminar de subir). Em vez de morrer de cara, espera um
++            # pouco e tenta de novo, no mesmo espirito do wait_for_dns()
++            # que ja existe pra resolucao de nome.
++            net_retry=0
++            while :; do
++                read -r def_iface IP <<EOF
++$(ip route get "$server_ip" 2>/dev/null | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
+ EOF
+-            test "${def_iface:-lo}" != "lo" || read -r def_iface IP <<EOF
+-$(ip route get 192.168.67.0 | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
++                test "${def_iface:-lo}" != "lo" || read -r def_iface IP <<EOF
++$(ip route get 192.168.67.0 2>/dev/null | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
+ EOF
+-            test "${def_iface:-lo}" != "lo" || die "Empty def_iface"
+-            test -n "$IP" || die "Empty IP"
++                if [ "${def_iface:-lo}" != "lo" ] && [ -n "$IP" ]; then
++                    break
++                fi
++                net_retry=$((net_retry + 1))
++                if [ "$net_retry" -ge 15 ]; then
++                    test "${def_iface:-lo}" != "lo" || die "Empty def_iface"
++                    test -n "$IP" || die "Empty IP"
++                fi
++                sleep 1
++            done
++
+             MAC=$(main_mac)
+             MAC=${MAC%% *}
+             test -n "$MAC" || die "Empty MAC"
+@@ -260,9 +317,11 @@ shutdown() {
  # $2 = thumbshot height.
  thumbshot() {
      # TODO: remove compatibility fallback after a few versions
@@ -239,7 +434,7 @@ index d54ba3b..e7e657c 100644
      if [ -f "./thumbshot.py" ]; then
          executable=./thumbshot.py
      else
-@@ -378,11 +380,68 @@ message() {
+@@ -378,11 +437,68 @@ message() {
      fi
  }
  
@@ -309,7 +504,7 @@ index d54ba3b..e7e657c 100644
  }
  
  # Connect to the server to get assistance.
-@@ -390,7 +449,11 @@ get_monitored() {
+@@ -390,7 +506,11 @@ get_monitored() {
  # $1 = host:port.
  # $2 = grab keyboard and mouse.
  get_assisted() {
@@ -322,7 +517,7 @@ index d54ba3b..e7e657c 100644
  }
  
  # Deactivate the screensaver, in order for the users to watch a broadcast.
-@@ -468,7 +531,7 @@ receive_broadcast() {
+@@ -468,7 +588,7 @@ receive_broadcast() {
  # The vnc clients should automatically exit when the server is killed.
  # Unfortunately, that isn't always true, so try to kill them anyway.
  stop_receptions() {
@@ -331,7 +526,7 @@ index d54ba3b..e7e657c 100644
  
      unset receiving_broadcast
      ensure_display
-@@ -477,6 +540,11 @@ stop_receptions() {
+@@ -477,6 +597,11 @@ stop_receptions() {
          kill "$pid"
          xprop_unset EPOPTES_VNCVIEWER_PID
      fi
