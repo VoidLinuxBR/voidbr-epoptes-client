@@ -333,7 +333,7 @@ index 557829c..9c11049 100755
  
  def main():
 diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
-index d54ba3b..3af05f1 100644
+index d54ba3b..9986a6e 100644
 --- a/usr/share/epoptes/client-functions
 +++ b/usr/share/epoptes/client-functions
 @@ -6,6 +6,45 @@
@@ -434,7 +434,7 @@ index d54ba3b..3af05f1 100644
      if [ -f "./thumbshot.py" ]; then
          executable=./thumbshot.py
      else
-@@ -378,11 +437,68 @@ message() {
+@@ -378,11 +437,83 @@ message() {
      fi
  }
  
@@ -446,7 +446,7 @@ index d54ba3b..3af05f1 100644
 +# $1 = host:port do servidor (o "${GUI_IP}:porta" que o Epoptes manda).
 +# $2 = "viewonly" (observar, sem controlar) ou "assist" (com controle).
 +wayland_reverse_vnc() {
-+    local target="$1" mode="$2" wport wpid spid
++    local target="$1" mode="$2" wport wpid spid old_pid
 +
 +    if ! which wayvnc >/dev/null 2>&1; then
 +        echo "wayland_reverse_vnc: wayvnc nao encontrado, instale o pacote wayvnc" >&5
@@ -456,6 +456,21 @@ index d54ba3b..3af05f1 100644
 +        echo "wayland_reverse_vnc: socat nao encontrado" >&5
 +        return 1
 +    fi
++
++    # Ao contrario do x11vnc -connect_or_exit (que sai sozinho assim que
++    # a conexao cai), o wayvnc fica escutando pra sempre depois que a
++    # sessao termina. Sem isso, cada nova tentativa de Observar/Assistir
++    # deixava mais uma instancia zumbi pra tras, competindo pelo mesmo
++    # recurso de captura de tela do compositor - normalmente so uma
++    # sessao de wlr-screencopy e permitida por vez, entao a segunda
++    # instancia falhava silenciosamente (background() nao verifica se o
++    # processo realmente conseguiu comecar a escutar). Por isso sempre
++    # matamos qualquer sessao anterior antes de abrir uma nova.
++    ensure_display
++    old_pid=$(xprop_get EPOPTES_WAYVNC_PID)
++    test -z "$old_pid" || kill "$old_pid" 2>/dev/null
++    old_pid=$(xprop_get EPOPTES_VNCVIEWER_PID)
++    test -z "$old_pid" || kill "$old_pid" 2>/dev/null
 +
 +    # Porta livre em localhost, escolhida pelo proprio kernel (porta 0).
 +    wport=$(python3 -c '
@@ -504,7 +519,7 @@ index d54ba3b..3af05f1 100644
  }
  
  # Connect to the server to get assistance.
-@@ -390,7 +506,11 @@ get_monitored() {
+@@ -390,7 +521,11 @@ get_monitored() {
  # $1 = host:port.
  # $2 = grab keyboard and mouse.
  get_assisted() {
@@ -517,7 +532,7 @@ index d54ba3b..3af05f1 100644
  }
  
  # Deactivate the screensaver, in order for the users to watch a broadcast.
-@@ -468,7 +588,7 @@ receive_broadcast() {
+@@ -468,7 +603,7 @@ receive_broadcast() {
  # The vnc clients should automatically exit when the server is killed.
  # Unfortunately, that isn't always true, so try to kill them anyway.
  stop_receptions() {
@@ -526,7 +541,7 @@ index d54ba3b..3af05f1 100644
  
      unset receiving_broadcast
      ensure_display
-@@ -477,6 +597,11 @@ stop_receptions() {
+@@ -477,6 +612,11 @@ stop_receptions() {
          kill "$pid"
          xprop_unset EPOPTES_VNCVIEWER_PID
      fi
