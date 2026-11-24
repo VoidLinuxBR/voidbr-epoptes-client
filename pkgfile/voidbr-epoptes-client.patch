@@ -333,10 +333,10 @@ index 557829c..9c11049 100755
  
  def main():
 diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
-index d54ba3b..9986a6e 100644
+index d54ba3b..f20c123 100644
 --- a/usr/share/epoptes/client-functions
 +++ b/usr/share/epoptes/client-functions
-@@ -6,6 +6,45 @@
+@@ -6,6 +6,67 @@
  # Implements the client side of the epoptes communications protocol.
  # The daemon reads this file when it starts, and sends it to clients when they
  # connect. The clients actually source it and then wait for further commands.
@@ -378,11 +378,85 @@ index d54ba3b..9986a6e 100644
 +#    se o autostart do compositor dispara antes da rede terminar de
 +#    subir, isso matava o processo de sessao pra sempre (nao volta
 +#    sozinho). Agora tenta por ate ~15 segundos antes de desistir.
++#
++# 5. xprop_set()/xprop_get()/xprop_unset(): guardavam PIDs (wayvnc,
++#    socat, screen-locker) como propriedades da janela raiz do X. Em
++#    Wayland puro (sem Xwayland/xprop) nada era gravado, entao nada era
++#    encerrado depois. Agora, com $WAYLAND_DISPLAY definido, cada valor
++#    vira um arquivo em $XDG_RUNTIME_DIR/epoptes-client/. Em X11 o
++#    comportamento continua o original.
++#
++# 6. ping(): em sessao de usuario, testava se o X estava vivo com xprop
++#    e chamava die "No X" se falhasse - em Wayland puro isso derrubava
++#    a conexao de sessao no primeiro ping. Agora, com $WAYLAND_DISPLAY
++#    definido, testa se o socket do compositor ainda existe. Em X11
++#    continua com xprop, como no original.
++#
++# 7. wayland_reverse_vnc(): quando o socat termina (o servidor fechou o
++#    Observar/Assistir), o wayvnc daquela sessao e encerrado junto, como
++#    o x11vnc -connect_or_exit faz. E o wayvnc usa um socket de controle
++#    proprio (-S), para nao colidir com um wayvnc que o usuario ja tenha
++#    aberto ("Another wayvnc process is already running"), e uma
++#    configuracao vazia propria (-C), para nao herdar senha/erros do
++#    ~/.config/wayvnc/config do usuario. Com wayvnc >= 0.10 usa tambem
++#    -e (--exit-on-disconnect), detectado pelo --help.
 +# ============================================================================
  
  # Dash handles signals a bit differently from bash.
  # We need to trap both 0 and 15 otherwise the trap function isn't called at all.
-@@ -139,14 +178,32 @@ info() {
+@@ -60,16 +121,51 @@ ensure_display() {
+     fi
+ }
+ 
++# VoidBR patch: diretorio de estado para sessoes Wayland, onde nao existe
++# janela raiz do X para guardar propriedades. Um arquivo por variavel.
++wayland_state_dir() {
++    local dir
++
++    dir="${XDG_RUNTIME_DIR:-/tmp}/epoptes-client"
++    test -n "$XDG_RUNTIME_DIR" || dir="/tmp/epoptes-client-$UID"
++    mkdir -p "$dir" 2>/dev/null && chmod 700 "$dir" 2>/dev/null
++    echo "$dir"
++}
++
++# VoidBR patch: testa se o compositor Wayland desta sessao ainda esta de pe
++# (o socket $WAYLAND_DISPLAY some quando o compositor encerra).
++wayland_alive() {
++    local sock
++
++    case "$WAYLAND_DISPLAY" in
++    /*) sock=$WAYLAND_DISPLAY ;;
++    *) sock="${XDG_RUNTIME_DIR:-/run/user/$UID}/$WAYLAND_DISPLAY" ;;
++    esac
++    test -S "$sock"
++}
++
+ xprop_set() {
++    if [ -n "$WAYLAND_DISPLAY" ]; then
++        echo "$2" >"$(wayland_state_dir)/$1"
++        return
++    fi
+     xprop -root -f "$1" 8u -set "$1" "$2"
+ }
+ 
+ xprop_get() {
++    if [ -n "$WAYLAND_DISPLAY" ]; then
++        cat "$(wayland_state_dir)/$1" 2>/dev/null
++        return 0
++    fi
+     # xprop -root UNSET_VAR echoes an error message to stdout instead of stderr
+     xprop -root "$1" 2>/dev/null | sed 's/^[^=]*//;s/^= "//;s/"$//;s/\\"/"/'
+ }
+ 
+ xprop_unset() {
++    if [ -n "$WAYLAND_DISPLAY" ]; then
++        rm -f "$(wayland_state_dir)/$1"
++        return 0
++    fi
+     xprop -root -remove "$1"
+ }
+ 
+@@ -139,14 +235,32 @@ info() {
          else
              server_ip=$(getent hosts "$SERVER" | awk '{ print $1; exit }')
              server_ip=${server_ip:-$SERVER}
@@ -421,7 +495,7 @@ index d54ba3b..9986a6e 100644
              MAC=$(main_mac)
              MAC=${MAC%% *}
              test -n "$MAC" || die "Empty MAC"
-@@ -260,9 +317,11 @@ shutdown() {
+@@ -260,9 +374,11 @@ shutdown() {
  # $2 = thumbshot height.
  thumbshot() {
      # TODO: remove compatibility fallback after a few versions
@@ -434,7 +508,7 @@ index d54ba3b..9986a6e 100644
      if [ -f "./thumbshot.py" ]; then
          executable=./thumbshot.py
      else
-@@ -378,11 +437,83 @@ message() {
+@@ -378,11 +494,103 @@ message() {
      fi
  }
  
@@ -446,13 +520,13 @@ index d54ba3b..9986a6e 100644
 +# $1 = host:port do servidor (o "${GUI_IP}:porta" que o Epoptes manda).
 +# $2 = "viewonly" (observar, sem controlar) ou "assist" (com controle).
 +wayland_reverse_vnc() {
-+    local target="$1" mode="$2" wport wpid spid old_pid
++    local target="$1" mode="$2" wport wpid spid old_pid ctl cfg exitopt
 +
-+    if ! which wayvnc >/dev/null 2>&1; then
++    if ! command -v wayvnc >/dev/null 2>&1; then
 +        echo "wayland_reverse_vnc: wayvnc nao encontrado, instale o pacote wayvnc" >&5
 +        return 1
 +    fi
-+    if ! which socat >/dev/null 2>&1; then
++    if ! command -v socat >/dev/null 2>&1; then
 +        echo "wayland_reverse_vnc: socat nao encontrado" >&5
 +        return 1
 +    fi
@@ -491,16 +565,36 @@ index d54ba3b..9986a6e 100644
 +    # esse modo customizado ("[drm] User-defined mode not supported"),
 +    # o que derruba a saida no meio da sessao ("Selected output ...
 +    # went away" no log do wayvnc).
++    # -S: socket de controle proprio. Sem isso o wayvnc usa o padrao
++    # ($XDG_RUNTIME_DIR/wayvncctl) e aborta com "Another wayvnc process is
++    # already running" se o usuario ja tiver um wayvnc aberto.
++    ctl="$(wayland_state_dir)/wayvncctl"
++    # -C: configuracao vazia propria. Sem isso o wayvnc le
++    # ~/.config/wayvnc/config do usuario; se ali tiver enable_auth=true o
++    # visualizador do Epoptes (sem senha) nao conecta, e se o arquivo
++    # tiver erro o wayvnc nem sobe.
++    cfg="$(wayland_state_dir)/wayvnc.config"
++    : >"$cfg"
++    # -e (--exit-on-disconnect, wayvnc >= 0.10): o proprio wayvnc encerra
++    # quando o servidor fecha a conexao. Versoes antigas nao tem a opcao;
++    # nelas o relay abaixo e quem encerra o wayvnc.
++    exitopt=""
++    if wayvnc --help 2>&1 | grep -q -- --exit-on-disconnect; then
++        exitopt="-e"
++    fi
 +    if [ "$mode" = viewonly ]; then
-+        wpid=$(background -p wayvnc -d -R 127.0.0.1 "$wport")
++        wpid=$(background -p wayvnc -C "$cfg" -S "$ctl" $exitopt -d -R 127.0.0.1 "$wport")
 +    else
-+        wpid=$(background -p wayvnc -R 127.0.0.1 "$wport")
++        wpid=$(background -p wayvnc -C "$cfg" -S "$ctl" $exitopt -R 127.0.0.1 "$wport")
 +    fi
 +
 +    # Da um tempo pro wayvnc comecar a escutar antes do socat tentar.
 +    sleep 0.3
 +
-+    spid=$(background -p socat "TCP:$target" "TCP:127.0.0.1:$wport")
++    # Quando o socat termina (servidor fechou o Observar/Assistir), encerra
++    # o wayvnc desta sessao, como o x11vnc -connect_or_exit faria sozinho.
++    spid=$(background -p sh -c 'socat "TCP:$1" "TCP:127.0.0.1:$2"; kill "$3" 2>/dev/null' \
++        epoptes-vnc-relay "$target" "$wport" "$wpid")
 +
 +    xprop_set EPOPTES_WAYVNC_PID "$wpid"
 +    xprop_set EPOPTES_VNCVIEWER_PID "$spid"
@@ -519,7 +613,7 @@ index d54ba3b..9986a6e 100644
  }
  
  # Connect to the server to get assistance.
-@@ -390,7 +521,11 @@ get_monitored() {
+@@ -390,7 +598,11 @@ get_monitored() {
  # $1 = host:port.
  # $2 = grab keyboard and mouse.
  get_assisted() {
@@ -532,7 +626,7 @@ index d54ba3b..9986a6e 100644
  }
  
  # Deactivate the screensaver, in order for the users to watch a broadcast.
-@@ -468,7 +603,7 @@ receive_broadcast() {
+@@ -468,7 +680,7 @@ receive_broadcast() {
  # The vnc clients should automatically exit when the server is killed.
  # Unfortunately, that isn't always true, so try to kill them anyway.
  stop_receptions() {
@@ -541,7 +635,7 @@ index d54ba3b..9986a6e 100644
  
      unset receiving_broadcast
      ensure_display
-@@ -477,6 +612,11 @@ stop_receptions() {
+@@ -477,6 +689,11 @@ stop_receptions() {
          kill "$pid"
          xprop_unset EPOPTES_VNCVIEWER_PID
      fi
@@ -553,3 +647,18 @@ index d54ba3b..9986a6e 100644
  }
  
  # Open a root terminal inside the X session.
+@@ -507,7 +724,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
+ # exit automatically, so tell it to exit as soon as X is unavailable.
+ ping() {
+     if [ "$UID" -gt 0 ]; then
+-        xprop -root -f EPOPTES_CLIENT 32c -set EPOPTES_CLIENT $$ || die "No X"
++        # VoidBR patch: em Wayland puro nao ha X para o xprop testar; ve se
++        # o compositor desta sessao ainda esta de pe. Em X11, o original.
++        if [ -n "$WAYLAND_DISPLAY" ]; then
++            wayland_alive || die "No Wayland"
++        else
++            xprop -root -f EPOPTES_CLIENT 32c -set EPOPTES_CLIENT $$ || die "No X"
++        fi
+     fi
+     if [ "$receiving_broadcast" = true ]; then
+         reset_screensaver

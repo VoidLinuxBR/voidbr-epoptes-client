@@ -15,7 +15,7 @@ license=(GPL3)
 arch=(any)
 sha256sums=(
 	'SKIP'
-	'355759dec7f4f57c58ace04cc87068161ccd7f16e13eee32c642a0794c1acd1c'
+	'ddd5cb71a9fdd1e555c371f8835f6ad4ca91c80bfc2de239227e56d93d0e36d0'
 )
 depends=(gobject-introspection
 	grim
@@ -59,6 +59,9 @@ prepare() {
 	# - observar/assistir (duplo-clique): wayvnc + socat fazendo o papel
 	#   de "conexao reversa" que o wayvnc nao tem nativamente (so
 	#   funciona em Hyprland/Sway/wlroots; sem efeito em GNOME/KDE ainda).
+	# - Wayland puro (sem Xwayland/xprop): PIDs guardados em arquivo em
+	#   $XDG_RUNTIME_DIR/epoptes-client/ e ping() testando o socket do
+	#   compositor, em vez de depender do X. Em X11 nada muda.
 	# - gui.py: fix Python 3.14 (modulo "pipes" removido, virou "shlex").
 	patch -p1 < "${srcdir}/voidbr-epoptes-client.patch"
 }
