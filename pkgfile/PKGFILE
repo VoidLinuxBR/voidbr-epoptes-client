@@ -23,7 +23,6 @@ depends=(gobject-introspection
 	iperf
 	iproute2
 	faketime
-	kde-cli-tools
 	libnotify
 	librsvg
 	notification-daemon
@@ -37,6 +36,7 @@ depends=(gobject-introspection
 	python3-service_identity
 	python3-Twisted
 	socat
+	spectacle
 	tigervnc
 	wayvnc
 	x11vnc
@@ -44,7 +44,7 @@ depends=(gobject-introspection
 )
 # grim   -> thumbshots em Hyprland/Sway/river/labwc (wlroots)
 # wayvnc -> observar/assistir (duplo-clique) em Hyprland/Sway/wlroots
-# kde-cli-tools (spectacle) -> thumbshots em KDE Plasma Wayland
+# spectacle -> thumbshots em KDE Plasma Wayland
 # GNOME nao precisa de pacote extra: usa gdbus, que ja vem com glib
 # (dependencia transitiva de gtk+3). Void/xbps nao tem optdepends, entao
 # esses ficam como dependencia obrigatoria mesmo, ainda que so facam
@@ -101,7 +101,7 @@ post_install() {
   log "Após concluir tudo isso, você ainda precisará encerrar a sessão e entrar novamente."
   log "Feito isso, o Epoptes deverá funcionar normalmente.${RESET}"
   log "Thumbshots em Wayland: em Hyprland/Sway instale o pacote 'grim'; em KDE"
-  log "Plasma instale 'kde-cli-tools' (spectacle). GNOME nao precisa de nada extra."
+  log "Plasma instale 'spectacle'. GNOME nao precisa de nada extra."
   log "Observar/assistir clientes (duplo-clique) em Wayland: so funciona em"
   log "Hyprland/Sway por enquanto, instale o pacote 'wayvnc'."
 }

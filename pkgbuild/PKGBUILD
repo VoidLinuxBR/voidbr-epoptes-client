@@ -1,0 +1,118 @@
+# Maintainer: Vilmar Catafesta <vcatafesta@gmail.com>
+
+pkgname=voidbr-epoptes-client
+pkgver=20261124.0237
+pkgrel=1
+pkgdesc='An opensource computer lab management and monitoring tool (com suporte a thumbshots em Wayland: Hyprland/wlroots, GNOME, KDE Plasma)'
+arch=(any)
+url="https://github.com/voidlinuxbr/$pkgname"
+license=(GPL-3.0-or-later)
+depends=(
+	gobject-introspection
+	grim
+	gtk3
+	iperf
+	iproute2
+	libfaketime
+	libnotify
+	librsvg
+	notification-daemon
+	openssl
+	python
+	python-cairo
+	python-dbus
+	python-gobject
+	python-netifaces
+	python-pillow
+	python-pyopenssl
+	python-service-identity
+	python-twisted
+	socat
+	spectacle
+	tigervnc
+	wayvnc
+	x11vnc
+	xterm
+)
+makedepends=(git patch)
+# grim      -> thumbshots em Hyprland/Sway/river/labwc (wlroots)
+# wayvnc    -> observar/assistir (duplo-clique) em Hyprland/Sway/wlroots
+# spectacle -> thumbshots em KDE Plasma Wayland
+# GNOME nao precisa de pacote extra: usa gdbus, que ja vem com glib.
+# Ficam como dependencia obrigatoria, como no pacote Void.
+provides=(epoptes-client)
+conflicts=(epoptes-client)
+backup=(etc/default/epoptes-client)
+# Automatically detect and use the correct install file
+if [ -e "${pkgname}.install" ]; then
+	install=${pkgname}.install
+elif [ -e "pkgbuild.install" ]; then
+	install=pkgbuild.install
+fi
+# O .patch e o mesmo do pkgfile/ (Void): aqui e um link simbolico para
+# ../pkgfile/voidbr-epoptes-client.patch, para manter uma unica copia.
+source=(
+	"git+$url.git"
+	"voidbr-epoptes-client.patch"
+)
+sha256sums=(
+	'SKIP'
+	'ddd5cb71a9fdd1e555c371f8835f6ad4ca91c80bfc2de239227e56d93d0e36d0'
+)
+
+pkgver() {
+	cd "$pkgname"
+	git log -1 --format=%cd --date=format:%Y%m%d.%H%M
+}
+
+prepare() {
+	cd "$pkgname"
+	# VoidBR patch (mesmo do pacote Void): suporte a Wayland
+	# - thumbshots: grim (wlroots) / gdbus+Shell.Screenshot (GNOME) /
+	#   spectacle (KDE). O caminho X11 original permanece intocado.
+	# - observar/assistir (duplo-clique): wayvnc + socat fazendo o papel
+	#   de "conexao reversa" (so Hyprland/Sway/wlroots por enquanto).
+	# - Wayland puro (sem Xwayland/xprop): PIDs em arquivo em
+	#   $XDG_RUNTIME_DIR/epoptes-client/ e ping() testando o socket do
+	#   compositor. Em X11 nada muda.
+	# - gui.py: fix Python 3.14 (modulo "pipes" removido, virou "shlex").
+	patch -p1 < "$srcdir/voidbr-epoptes-client.patch"
+}
+
+package() {
+	cd "${srcdir}/${pkgname}"
+	# Modelo Chili (chili-xfce-config): tudo vai para /usr/share/${pkgname}
+	# no pacote e o pkgbuild.install copia para / no post_install
+	# (sh_copy_user_etc_usr_opt_files do pkgbuildlib.sh).
+	install -dm755 "${pkgdir}/usr/share/${pkgname}"
+	local dirs=("usr" "etc" "opt")
+	for dir in "${dirs[@]}"; do
+		if [ -d "${srcdir}/${pkgname}/${dir}" ]; then
+			cp -a "${srcdir}/${pkgname}/${dir}" "${pkgdir}/usr/share/${pkgname}/"
+		fi
+	done
+
+	local stage="${pkgdir}/usr/share/${pkgname}"
+	# etc/sv e do runit (Void); no Arch o servico vem das units do systemd.
+	rm -rf "${stage}/etc/sv"
+	# No Arch /usr/sbin e link para /usr/bin (pacote filesystem): copiar
+	# uma pasta usr/sbin por cima dele falha. A unit do systemd e o
+	# autostart chamam /usr/sbin/epoptes-client, que resolve pelo link.
+	install -Dm755 "${stage}/usr/sbin/epoptes-client" "${stage}/usr/bin/epoptes-client"
+	rm -rf "${stage}/usr/sbin"
+	# etc/default fica como arquivo do pacman (backup=), fora da copia do
+	# post_install, para o upgrade nao sobrescrever a configuracao local.
+	rm -rf "${stage}/etc/default"
+	install -Dm644 "etc/default/epoptes-client" "${pkgdir}/etc/default/epoptes-client"
+	find "${stage}" -type d -name __pycache__ -prune -exec rm -rf {} +
+
+	# Install license file if present
+	if [ -f "LICENSE" ]; then
+		install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+	fi
+
+	# Install documentation if present
+	if [ -f "README.md" ]; then
+		install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+	fi
+}

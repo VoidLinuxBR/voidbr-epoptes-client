@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#
+LIBRARY=${LIBRARY:-'/usr/share/chiliwebview/bcc/shell'}
+[[ -f "${LIBRARY}/pkgbuildlib.sh" ]] && source "${LIBRARY}/pkgbuildlib.sh"
+#
+declare IS_VERBOSE=true
+declare IS_UPGRADE=false
+declare IS_DBLOCK=false
+declare IS_METAPKG=false
+declare IS_SKEL=false
+declare pkgname=voidbr-epoptes-client
+declare servicesToEnable=(epoptes-client)
+declare servicesToDisable=()
+
+# Sem o chili-base-config (Arch puro), define o minimo que e usado abaixo.
+if ! declare -F sh_get_real_user >/dev/null; then
+  msg() { $IS_VERBOSE && echo -e "==>[${pkgname}] ${*}" >&2; }
+  log_ok() { $IS_VERBOSE && echo -e "==>[${pkgname}] [✓] ${*}"; }
+  log_err() { $IS_VERBOSE && echo -e "==>[${pkgname}] [✗] ${*}"; }
+  sh_init() { msg "Inicializando a instalação e configuração do pacote: $pkgname..."; }
+  sh_get_real_user() {
+    user="${SUDO_USER:-$USER}"
+    if ! getent passwd "$user" >/dev/null || [[ $user = root ]]; then
+      user=$(awk -F: '$3 >= 1000 && $3 < 65000 { print $1; exit }' /etc/passwd)
+    fi
+    user_home=$(getent passwd "$user" | cut -d: -f6)
+  }
+  ensure_group_user() {
+    getent group "$2" &>/dev/null || groupadd $3 "$2" &>/dev/null
+    [[ -n $1 ]] && { id -nG "$1" | grep -qw "$2" || gpasswd -a "$1" "$2" &>/dev/null; }
+  }
+  sh_enable_services() {
+    for service in "${servicesToEnable[@]}"; do
+      if systemctl enable "${service}" --force &>/dev/null; then
+        log_ok "Serviço ${service} ativado..."
+      else
+        log_err "Erro: Ocorreu um erro ao ativar o serviço ${service}"
+      fi
+    done
+  }
+  sh_copy_user_etc_usr_opt_files() {
+    msg "Copiando arquivos e diretórios..."
+    local dirs=("usr" "etc" "opt")
+    for dir in "${dirs[@]}"; do
+      if [ -d "/usr/share/${pkgname}/${dir}" ]; then
+        cp -a "/usr/share/${pkgname}/${dir}" "/"
+      fi
+    done
+  }
+  sh_finish() { msg "Configuração completa."; }
+fi
+
+post_install() {
+  [[ $IS_VERBOSE = true ]] && sh_init                        || { sh_init 2>/dev/null                        || true; }
+  [[ $IS_VERBOSE = true ]] && sh_copy_user_etc_usr_opt_files || { sh_copy_user_etc_usr_opt_files 2>/dev/null || true; }
+  [[ $IS_VERBOSE = true ]] && sh_get_real_user               || { sh_get_real_user 2>/dev/null               || true; }
+
+  # As units do systemd foram copiadas fora do pacman (o hook de
+  # daemon-reload do pacman nao as ve), entao recarrega aqui.
+  systemctl daemon-reload &>/dev/null || true
+
+  ensure_group_user "$user" epoptes --system
+  mkdir -p /etc/epoptes
+
+  if ! $IS_UPGRADE; then
+    sh_enable_services
+    msg "Configure o servidor em ${yellow}/etc/default/epoptes-client${reset} (SERVER=...)"
+    msg "e busque o certificado dele: ${yellow}sudo epoptes-client -c"
+    msg "Depois inicie o cliente: ${yellow}sudo systemctl start epoptes-client"
+    msg "Encerre a sessão e entre novamente para valer o grupo 'epoptes'."
+  fi
+
+  sh_finish
+}
+
+post_upgrade() {
+  IS_UPGRADE=true
+  post_install
+}
