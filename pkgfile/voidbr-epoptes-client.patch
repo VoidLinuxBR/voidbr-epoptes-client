@@ -1,5 +1,5 @@
 diff --git a/usr/sbin/epoptes-client b/usr/sbin/epoptes-client
-index 7a2ee2a..09d20fe 100755
+index 7a2ee2a..cfcdb4c 100755
 --- a/usr/sbin/epoptes-client
 +++ b/usr/sbin/epoptes-client
 @@ -9,8 +9,10 @@
@@ -36,7 +36,7 @@ index 7a2ee2a..09d20fe 100755
          fi
          if [ "$delay" -eq 5 ]; then
              echo "Cannot resolve $SERVER, will keep retrying."
-@@ -164,6 +172,152 @@ EOF
+@@ -164,6 +172,171 @@ EOF
      fi
  }
  
@@ -99,6 +99,24 @@ index 7a2ee2a..09d20fe 100755
 +            "reinstale o pacote do cliente (xbps-install -f / pacman -S)"
 +    fi
 +
++    # O processo do root vem do servico. Ele pode estar rodando desde o boot
++    # e mesmo assim estar desabilitado - ai nao volta no proximo boot.
++    if [ -d /run/systemd/system ]; then
++        if systemctl is-enabled --quiet epoptes-client 2>/dev/null; then
++            check_ok "servico epoptes-client habilitado no boot (systemd)"
++        else
++            check_fail "servico epoptes-client nao esta habilitado no boot" \
++                "sudo systemctl enable --now epoptes-client"
++        fi
++    elif [ -d /etc/runit/runsvdir ]; then
++        if [ -e /etc/runit/runsvdir/current/epoptes-client ]; then
++            check_ok "servico epoptes-client habilitado no boot (runit)"
++        else
++            check_fail "servico epoptes-client nao esta habilitado no boot" \
++                "sudo ln -s /etc/sv/epoptes-client /var/service/"
++        fi
++    fi
++
 +    if [ -z "$(echo "$SERVER" | tr -d '0-9.')" ] ||
 +        getent hosts "$SERVER" >/dev/null; then
 +        check_ok "o nome $SERVER resolve: $(getent hosts "$SERVER" | awk '{ print $1; exit }')"
@@ -128,16 +146,17 @@ index 7a2ee2a..09d20fe 100755
 +    # enquanto ainda tenta conectar (tenta de novo a cada 60 s), por isso
 +    # conta os processos, e nao so as conexoes ja estabelecidas.
 +    me=$(id -un)
-+    procs=$(ps --sort=start_time -C socat -o user:32=,pid=,tty=,args= |
++    procs=$(ps --sort=start_time -C socat -o user:32=,pid=,args= |
 +        grep "openssl-connect:$SERVER:$PORT")
 +    summary=$(echo "$procs" | awk 'NF { c[$1]++ }
 +        END { for (u in c) printf "%s(%d) ", u, c[u] }')
 +    conns=$(ss -Htn state established "( dport = :$PORT )" 2>/dev/null | wc -l)
 +    echo "  [INFO]  processos por usuario: ${summary:-nenhum}; conexoes estabelecidas: $conns"
-+    # Os que nao estao presos a um terminal (tty "?", vindos do login/servico)
-+    # vem primeiro; entre eles, o mais antigo. O primeiro e o que fica.
-+    mypids=$(echo "$procs" | awk -v u="$me" '$1 == u { print ($3 == "?" ? 0 : 1), $2 }' |
-+        sort -s -k1,1n | awk '{ print $2 }')
++    # Do mais antigo para o mais novo (--sort=start_time); o primeiro e o que
++    # fica - normalmente o do login, que sobe antes de qualquer um aberto a
++    # mao. (Nao da para usar o terminal para separar: no Void os processos da
++    # sessao grafica herdam o tty do Xorg, como o tty8.)
++    mypids=$(echo "$procs" | awk -v u="$me" '$1 == u { print $2 }')
 +    mycount=$(echo "$mypids" | grep -c .)
 +    if [ "$mycount" -eq 0 ]; then
 +        if [ "$UID" -eq 0 ]; then
@@ -189,7 +208,7 @@ index 7a2ee2a..09d20fe 100755
  # Main.
  version
  
-@@ -185,6 +339,10 @@ case "$1" in
+@@ -185,6 +358,10 @@ case "$1" in
      need_certificate=true
      shift
      ;;
@@ -200,7 +219,7 @@ index 7a2ee2a..09d20fe 100755
  esac
  
  # Set a reasonable PATH to execute commands or to relaunch epoptes-client.
-@@ -209,6 +367,8 @@ export "PORT=${2:-$PORT}"
+@@ -209,6 +386,8 @@ export "PORT=${2:-$PORT}"
  test -n "$need_certificate" && fetch_certificate
  
  servercrt=/etc/epoptes/server.crt
@@ -209,7 +228,7 @@ index 7a2ee2a..09d20fe 100755
  # Don't launch as root on epoptes servers, unless there's a main server
  if [ "$UID" -eq 0 ] && [ $TYPE = "standalone" ] && [ -x /usr/bin/epoptes ]; then
      if [ -s /etc/epoptes/main-server.crt ]; then
-@@ -270,6 +430,12 @@ else
+@@ -270,6 +449,12 @@ else
      cert_param="verify=0"
  fi
  
