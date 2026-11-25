@@ -15,54 +15,56 @@ license=(GPL3)
 arch=(any)
 sha256sums=(
 	'SKIP'
-	'ddd5cb71a9fdd1e555c371f8835f6ad4ca91c80bfc2de239227e56d93d0e36d0'
+	'65a608ad84affd2321588a56b8e1a7c55e391416c63e8be3fde817ef5314f69e'
 )
-depends=(gobject-introspection
+depends=(
+	dbus
+	gobject-introspection
 	grim
 	gtk+3
 	iperf
 	iproute2
-	faketime
-	libnotify
 	librsvg
-	notification-daemon
 	openssl
+	procps-ng
 	python3-cairo
-	python3-dbus
 	python3-gobject
-	python3-netifaces
-	python3-openssl
 	python3-Pillow
-	python3-service_identity
-	python3-Twisted
+	screen
 	socat
 	spectacle
 	tigervnc
 	wayvnc
 	x11vnc
+	xprop
+	xset
 	xterm
+	xwininfo
 )
-# grim   -> thumbshots em Hyprland/Sway/river/labwc (wlroots)
-# wayvnc -> observar/assistir (duplo-clique) em Hyprland/Sway/wlroots
+# So o que o lado cliente usa (base: debian/control do Epoptes oficial, mais
+# o suporte a Wayland). Twisted, netifaces, pyOpenSSL, faketime e
+# notification-daemon sao do servidor e sairam daqui.
+# grim      -> thumbshots em Hyprland/Sway/river/labwc (wlroots)
+# wayvnc    -> observar/assistir (duplo-clique) em Hyprland/Sway/wlroots
 # spectacle -> thumbshots em KDE Plasma Wayland
-# GNOME nao precisa de pacote extra: usa gdbus, que ja vem com glib
-# (dependencia transitiva de gtk+3). Void/xbps nao tem optdepends, entao
-# esses ficam como dependencia obrigatoria mesmo, ainda que so facam
-# sentido em alguns ambientes.
+# GNOME nao precisa de pacote extra: usa gdbus, que ja vem com glib.
+# xprop/xset/xwininfo, x11vnc, tigervnc e xterm -> sessoes X11.
+# Void/xbps nao tem optdepends, entao tudo fica como dependencia.
 backup=(/etc/default/epoptes-client)
 
 prepare() {
 	cd "${srcdir}/${pkgname}"
-	# VoidBR patch: suporte a Wayland (Hyprland/wlroots, GNOME, KDE Plasma)
-	# - thumbshots: grim (wlroots) / gdbus+Shell.Screenshot (GNOME) /
-	#   spectacle (KDE). O caminho X11 original permanece intocado.
-	# - observar/assistir (duplo-clique): wayvnc + socat fazendo o papel
-	#   de "conexao reversa" que o wayvnc nao tem nativamente (so
-	#   funciona em Hyprland/Sway/wlroots; sem efeito em GNOME/KDE ainda).
-	# - Wayland puro (sem Xwayland/xprop): PIDs guardados em arquivo em
-	#   $XDG_RUNTIME_DIR/epoptes-client/ e ping() testando o socket do
-	#   compositor, em vez de depender do X. Em X11 nada muda.
-	# - gui.py: fix Python 3.14 (modulo "pipes" removido, virou "shlex").
+	# VoidBR patch (gerado com ./gera-patch.sh, na raiz do repositorio):
+	# - thumbshot.py: miniaturas em Wayland - grim (wlroots) /
+	#   gdbus+Shell.Screenshot (GNOME) / spectacle (KDE). O caminho X11
+	#   original permanece intocado.
+	# - epoptes-client --check: diagnostico (arquivos, nome do servidor,
+	#   certificado, conexoes e miniatura).
+	# - epoptes-client: avisa no log quando o certificado do servidor mudou
+	#   (servidor reinstalado) e nao desiste mais quando o nome do servidor
+	#   ainda nao resolve (VPN subindo depois da rede no boot/login).
+	# O client-functions (observar/assistir em Wayland) vem do SERVIDOR na
+	# conexao; esse e o patch do pacote voidbr-epoptes.
 	patch -p1 < "${srcdir}/voidbr-epoptes-client.patch"
 }
 
@@ -100,10 +102,10 @@ post_install() {
   log "    ${YELLOW}'vservice start epoptes-client' ${CYAN}para iniciar o serviço do cliente Epoptes."
   log "Após concluir tudo isso, você ainda precisará encerrar a sessão e entrar novamente."
   log "Feito isso, o Epoptes deverá funcionar normalmente.${RESET}"
-  log "Thumbshots em Wayland: em Hyprland/Sway instale o pacote 'grim'; em KDE"
-  log "Plasma instale 'spectacle'. GNOME nao precisa de nada extra."
   log "Observar/assistir clientes (duplo-clique) em Wayland: so funciona em"
-  log "Hyprland/Sway por enquanto, instale o pacote 'wayvnc'."
+  log "Hyprland/Sway e outros compositores wlroots por enquanto."
+  log "Se algo nao funcionar, rode ${YELLOW}epoptes-client --check${CYAN} como usuario,"
+  log "num terminal da sessao grafica, para ver o diagnostico.${RESET}"
 }
 pre_upgrade() {
 	log "Iniciando upgrade"

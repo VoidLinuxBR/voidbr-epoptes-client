@@ -1,119 +1,196 @@
-diff --git a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-index 720c958..381eec1 100644
---- a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-+++ b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-@@ -4,10 +4,19 @@
- # SPDX-License-Identifier: GPL-3.0-or-later
- """
- Epoptes GUI class.
+diff --git a/usr/sbin/epoptes-client b/usr/sbin/epoptes-client
+index 7a2ee2a..82d3645 100755
+--- a/usr/sbin/epoptes-client
++++ b/usr/sbin/epoptes-client
+@@ -9,8 +9,10 @@
+ 
+ usage() {
+     cat <<EOF
+-Usage: $0 [-c|-h|-v] [SERVER] [PORT]
++Usage: $0 [-c|-h|-v|--check] [SERVER] [PORT]
+ Connect to a remote server and offer it a local shell.
++  --check   diagnostico: arquivos, nome do servidor, certificado, conexoes
++            e miniatura (rode como usuario, na sessao grafica)
+ EOF
+ }
+ 
+@@ -126,11 +128,17 @@ wait_for_dns() {
+     while true; do
+         server_ip=$(getent hosts "$SERVER" | awk '{ print $1; exit }')
+         test -n "$server_ip" && break
+-        # If DNS is up and SERVER is not an MDNS name, abort
+-        if [ "${SERVER%.local}" = "${SERVER}" ] &&
++        # VoidBR patch: nao desiste mais. Com VPN (Tailscale/WireGuard), no
++        # boot e no login a internet resolve nomes antes de a VPN subir, e o
++        # nome do servidor so resolve depois. Abortar aqui matava de vez a
++        # conexao da sessao do usuario (o autostart nao reinicia) e, no
++        # systemd, tambem a do root (RemainAfterExit, sem Restart).
++        # Agora avisa uma vez e continua tentando.
++        if [ "${SERVER%.local}" = "${SERVER}" ] && [ -z "$warned_dns" ] &&
+             [ -n "$(getent hosts "ntp.org" | awk '{ print $1; exit }')" ]; then
+-            echo "Cannot resolve $SERVER while DNS appears to work, aborting."
+-            exit 1
++            warned_dns=1
++            echo "Cannot resolve $SERVER while DNS appears to work, will keep retrying." \
++                "Check SERVER in /etc/default/epoptes-client or /etc/hosts."
+         fi
+         if [ "$delay" -eq 5 ]; then
+             echo "Cannot resolve $SERVER, will keep retrying."
+@@ -164,6 +172,121 @@ EOF
+     fi
+ }
+ 
++# VoidBR patch: impressao digital (sha256) do certificado que o servidor
++# apresenta agora; vazio se nao conectou. Usa timeout para nao travar quando
++# o servidor (ou a VPN) ainda nao esta de pe.
++server_fingerprint() {
++    timeout 5 openssl s_client -connect "$SERVER:$PORT" </dev/null 2>/dev/null |
++        sed '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/!d' |
++        openssl x509 -noout -fingerprint -sha256 2>/dev/null
++}
 +
-+PATCH (VoidBR):
-+  1. "import pipes" -> "import shlex" / pipes.quote -> shlex.quote.
-+     O modulo "pipes" foi removido no Python 3.13 (shlex.quote e o
-+     substituto direto, mesma assinatura).
-+  2. reverse_connection(): usado por "Observar"/"Assistir" (duplo-
-+     clique). Ver comentario na propria funcao para o detalhe do bug
-+     que isso corrige (vncviewer -listen que fica "vivo" mas para de
-+     aceitar novas sessoes RFB).
- """
- from distutils.version import LooseVersion
- import os
--import pipes
-+import shlex
- import random
- import socket
- import string
-@@ -276,39 +285,52 @@ class EpoptesGui(object):
- 
-     def reverse_connection(self, cmd, *args):
-         """Helper function for on_imi_broadcasts_*_activate."""
--        # Open vncviewer in listen mode
--        if self.vncviewer is None or self.vncviewer.poll() is not None:
--            self.vncviewer_port = self.find_unused_port()
--            if os.path.isfile('/usr/share/applications/realvnc-vncviewer.desktop'):
--                viewer = 'realvnc-vnc-viewer'
--            elif os.path.isfile('/usr/bin/ssvncviewer'):
--                viewer = 'ssvncviewer'
--            else:
--                viewer = os.path.realpath('/usr/bin/vncviewer')
--                viewer = os.path.basename(viewer)
--            if viewer == 'realvnc-vnc-viewer':
--                scmd = ['vncviewer', '-uselocalcursor=0', '-scaling=aspectfit',
--                       '-securitynotificationtimeout=0', '-warnunencrypted=0',
--                       '-enabletoolbar=0', '-listen', str(self.vncviewer_port)]
--            elif viewer == 'ssvncviewer':
--                scmd = ['ssvncviewer', '-scale', 'auto', '-multilisten',
--                       str(self.vncviewer_port-5500)]
--            elif viewer == 'xtigervncviewer':
--                scmd = ['xtigervncviewer', '-listen', str(self.vncviewer_port)]
--            elif viewer == 'xtightvncviewer':
--                scmd = ['xtightvncviewer', '-listen',
--                       str(self.vncviewer_port-5500)]
--            elif viewer == 'xvnc4viewer':
--                scmd = ['xvnc4viewer',  '-uselocalcursor=0', '-listen',
--                       str(self.vncviewer_port)]
--            else:
--                # A generic vncviewer, e.g. tigervnc on Arch/Fedora/SUSE
--                scmd = ['vncviewer', '-listen', str(self.vncviewer_port)]
--            self.vncviewer = subprocess.Popen(scmd)
-+        # VoidBR fix: o TigerVNC (-listen) as vezes fica "vivo" (processo
-+        # nao sai sozinho) mas para de aceitar novas sessoes RFB depois
-+        # que a primeira termina. Confiar em self.vncviewer.poll() pra
-+        # decidir se reaproveita o listener antigo faz a segunda
-+        # tentativa de observar sempre falhar com "connection dropped
-+        # by the server before the session could be established".
-+        # Por isso agora sempre encerramos o anterior e subimos um novo.
-+        if self.vncviewer is not None and self.vncviewer.poll() is None:
-+            self.vncviewer.terminate()
-+            try:
-+                self.vncviewer.wait(timeout=2)
-+            except subprocess.TimeoutExpired:
-+                self.vncviewer.kill()
++local_fingerprint() {
++    openssl x509 -noout -fingerprint -sha256 -in "$servercrt" 2>/dev/null
++}
 +
-+        self.vncviewer_port = self.find_unused_port()
-+        if os.path.isfile('/usr/share/applications/realvnc-vncviewer.desktop'):
-+            viewer = 'realvnc-vnc-viewer'
-+        elif os.path.isfile('/usr/bin/ssvncviewer'):
-+            viewer = 'ssvncviewer'
-+        else:
-+            viewer = os.path.realpath('/usr/bin/vncviewer')
-+            viewer = os.path.basename(viewer)
-+        if viewer == 'realvnc-vnc-viewer':
-+            scmd = ['vncviewer', '-uselocalcursor=0', '-scaling=aspectfit',
-+                   '-securitynotificationtimeout=0', '-warnunencrypted=0',
-+                   '-enabletoolbar=0', '-listen', str(self.vncviewer_port)]
-+        elif viewer == 'ssvncviewer':
-+            scmd = ['ssvncviewer', '-scale', 'auto', '-multilisten',
-+                   str(self.vncviewer_port-5500)]
-+        elif viewer == 'xtigervncviewer':
-+            scmd = ['xtigervncviewer', '-listen', str(self.vncviewer_port)]
-+        elif viewer == 'xtightvncviewer':
-+            scmd = ['xtightvncviewer', '-listen',
-+                   str(self.vncviewer_port-5500)]
-+        elif viewer == 'xvnc4viewer':
-+            scmd = ['xvnc4viewer',  '-uselocalcursor=0', '-listen',
-+                   str(self.vncviewer_port)]
-+        else:
-+            # A generic vncviewer, e.g. tigervnc on Arch/Fedora/SUSE
-+            scmd = ['vncviewer', '-listen', str(self.vncviewer_port)]
-+        self.vncviewer = subprocess.Popen(scmd)
- 
-         # And, tell the clients to connect to the server
-         self.exec_on_selected_clients(' '.join([cmd, '"${GUI_IP}:%d"' % self.vncviewer_port] + list(args)))
- 
++# VoidBR patch: quando o servidor e reinstalado ele gera um certificado novo,
++# e o cliente com o antigo so falha no TLS, em silencio, para sempre. Avisa
++# no log (svlogd/journal do root, ~/.xsession-errors da sessao) como resolver.
++check_certificate() {
++    local remote
 +
-     def on_imi_broadcasts_monitor_user_activate(self, _widget):
-         """Handle imi_sbroadcasts_monitor_user.activate event."""
-         self.reverse_connection('get_monitored')
-@@ -1059,7 +1081,7 @@ class EpoptesGui(object):
-         # ${GUI_PY} must be unquoted, don't pass it as list
-         if isinstance(command, list) and len(command) > 0:
-             command = '%s %s' % (command[0], ' '.join(
--                [pipes.quote(str(x)) for x in command[1:]]))
-+                [shlex.quote(str(x)) for x in command[1:]]))
++    remote=$(server_fingerprint)
++    test -n "$remote" || return 0
++    if [ "$remote" != "$(local_fingerprint)" ]; then
++        echo "epoptes-client WARNING: the certificate of $SERVER:$PORT changed" \
++            "(server reinstalled?). Run as root: epoptes-client -c," \
++            "then restart the epoptes-client service and the session." >&2
++    fi
++}
++
++check_ok() {
++    echo "  [OK]    $*"
++}
++
++check_fail() {
++    echo "  [FALHA] $1"
++    test -n "$2" && echo "          -> $2"
++    check_failures=$((check_failures + 1))
++}
++
++# VoidBR patch: epoptes-client --check, diagnostico em uma saida so.
++run_check() {
++    local dir missing f remote conns users err
++
++    check_failures=0
++    dir=/usr/share/epoptes-client
++    echo "Diagnostico do epoptes-client (servidor $SERVER:$PORT, uid $UID)"
++
++    missing=
++    for f in _common.py endsession get-display lock.svg lock_screen.py \
++        message.py receive-terminals remote_assistance.py \
++        remote_assistance.ui share-terminal thumbshot.py; do
++        test -e "$dir/$f" || missing="$missing $f"
++    done
++    if [ -z "$missing" ]; then
++        check_ok "arquivos de $dir completos"
++    else
++        check_fail "faltam arquivos em $dir:$missing" \
++            "reinstale o pacote do cliente (xbps-install -f / pacman -S)"
++    fi
++
++    if [ -z "$(echo "$SERVER" | tr -d '0-9.')" ] ||
++        getent hosts "$SERVER" >/dev/null; then
++        check_ok "o nome $SERVER resolve: $(getent hosts "$SERVER" | awk '{ print $1; exit }')"
++    else
++        check_fail "o nome $SERVER nao resolve" \
++            "ajuste SERVER= em /etc/default/epoptes-client ou o /etc/hosts"
++    fi
++
++    if [ -s "$servercrt" ]; then
++        check_ok "certificado local em $servercrt"
++    else
++        check_fail "nao existe $servercrt" "rode como root: epoptes-client -c"
++    fi
++
++    remote=$(server_fingerprint)
++    if [ -z "$remote" ]; then
++        check_fail "nao conectou em $SERVER:$PORT" \
++            "servidor desligado, servico epoptes parado, firewall ou rede/VPN"
++    elif [ "$remote" != "$(local_fingerprint)" ]; then
++        check_fail "o certificado do servidor e diferente do local" \
++            "rode como root: epoptes-client -c, e reinicie o servico e a sessao"
++    else
++        check_ok "o servidor responde e o certificado confere"
++    fi
++
++    conns=$(ss -Htn state established "( dport = :$PORT )" 2>/dev/null | wc -l)
++    users=$(ps -eo user=,args= | grep "openssl-connect:" | grep -v grep |
++        awk '{ print $1 }' | sort -u | tr '\n' ' ')
++    if [ "${conns:-0}" -gt 0 ]; then
++        check_ok "$conns conexao(oes) estabelecida(s); processos de: ${users:-?}"
++    else
++        check_fail "nenhuma conexao estabelecida com $SERVER:$PORT" \
++            "veja os itens acima; o root conecta pelo servico, o usuario pelo login"
++    fi
++
++    if [ "$UID" -eq 0 ]; then
++        echo "  [INFO]  rode tambem como usuario, na sessao grafica, para testar a miniatura"
++    elif [ -n "$WAYLAND_DISPLAY" ] || [ -n "$DISPLAY" ]; then
++        if err=$(cd "$dir" && ./thumbshot.py 16 12 2>&1 >/dev/null); then
++            check_ok "miniatura (thumbshot) funciona nesta sessao"
++        else
++            check_fail "miniatura (thumbshot) falhou" \
++                "$(echo "$err" | tail -n 1)"
++        fi
++    else
++        echo "  [INFO]  sem sessao grafica (DISPLAY/WAYLAND_DISPLAY): miniatura nao testada"
++    fi
++
++    if [ "$check_failures" -eq 0 ]; then
++        echo "Tudo certo."
++    else
++        echo "$check_failures problema(s) encontrado(s)."
++    fi
++    exit "$check_failures"
++}
++
+ # Main.
+ version
  
-         if (clients != [] or handles != []) and warning != '':
-             if not self.confirmation_dialog(warning):
+@@ -185,6 +308,10 @@ case "$1" in
+     need_certificate=true
+     shift
+     ;;
++--check)
++    need_check=true
++    shift
++    ;;
+ esac
+ 
+ # Set a reasonable PATH to execute commands or to relaunch epoptes-client.
+@@ -209,6 +336,8 @@ export "PORT=${2:-$PORT}"
+ test -n "$need_certificate" && fetch_certificate
+ 
+ servercrt=/etc/epoptes/server.crt
++# VoidBR patch: diagnostico (sai com o numero de problemas encontrados)
++test -n "$need_check" && run_check
+ # Don't launch as root on epoptes servers, unless there's a main server
+ if [ "$UID" -eq 0 ] && [ $TYPE = "standalone" ] && [ -x /usr/bin/epoptes ]; then
+     if [ -s /etc/epoptes/main-server.crt ]; then
+@@ -270,6 +399,12 @@ else
+     cert_param="verify=0"
+ fi
+ 
++# VoidBR patch: avisa no log se o certificado do servidor mudou. Em segundo
++# plano, para nao atrasar a conexao quando o servidor ainda nao responde.
++if [ "$cert_param" != "verify=0" ] && [ -s "$servercrt" ]; then
++    check_certificate &
++fi
++
+ # Connect to the server, or keep retrying until the server gets online
+ # (for standalone workstations booted before the server).
+ if [ -s "$servercrt" ] || [ "$cert_param" = "verify=0" ]; then
 diff --git a/usr/share/epoptes-client/thumbshot.py b/usr/share/epoptes-client/thumbshot.py
 index 557829c..9c11049 100755
 --- a/usr/share/epoptes-client/thumbshot.py
@@ -332,333 +409,3 @@ index 557829c..9c11049 100755
  
  
  def main():
-diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
-index d54ba3b..f20c123 100644
---- a/usr/share/epoptes/client-functions
-+++ b/usr/share/epoptes/client-functions
-@@ -6,6 +6,67 @@
- # Implements the client side of the epoptes communications protocol.
- # The daemon reads this file when it starts, and sends it to clients when they
- # connect. The clients actually source it and then wait for further commands.
-+#
-+# ============================================================================
-+# VoidBR patch - resumo das mudancas (ver comentarios inline em cada funcao
-+# para o detalhe de cada uma):
-+#
-+# 1. thumbshot(): removido o bypass que pulava a captura inteira quando
-+#    $WAYLAND_DISPLAY estava definido. A captura em si (grim/gdbus/
-+#    spectacle conforme o compositor) fica no thumbshot.py, que roda
-+#    localmente no cliente - aqui so precisava parar de pular a chamada.
-+#
-+# 2. wayland_reverse_vnc() (nova) + get_monitored()/get_assisted():
-+#    "Observar"/"Assistir" (duplo-clique) usavam x11vnc -connect_or_exit,
-+#    que nao existe em Wayland. wayvnc e o equivalente pra compositores
-+#    wlroots (Hyprland/Sway), mas so sabe ESCUTAR - nao tem modo de
-+#    conectar pra fora. O socat faz essa ponte: disca pro servidor
-+#    (a "conexao reversa" que o Epoptes espera) e repassa os bytes pro
-+#    wayvnc, que fica escutando so em localhost. Detalhes:
-+#      -d            desliga input remoto (so no modo "observar")
-+#      -R            desliga o auto-resize do wayvnc; em placas mais
-+#                    antigas (driver "radeon", por ex.) o kernel recusa
-+#                    o modo customizado que isso gera ("[drm] User-
-+#                    defined mode not supported"), derrubando a saida
-+#                    no meio da sessao.
-+#      host e porta  tem que ir como argumentos SEPARADOS pro wayvnc
-+#                    ("host porta", nao "host:porta" numa string so).
-+#    So funciona em Hyprland/Sway/wlroots do lado do cliente por
-+#    enquanto - GNOME e KDE nao tem equivalente direto ao wayvnc ainda.
-+#
-+# 3. stop_receptions(): agora tambem mata o processo wayvnc (via
-+#    EPOPTES_WAYVNC_PID), alem do que ja matava antes (VNCVIEWER_PID,
-+#    que agora e o PID do socat do relay).
-+#
-+# 4. info(): a deteccao de rota/IP local (ip route get) morria com
-+#    "die" na primeira falha, sem retry - diferente da resolucao de
-+#    DNS (wait_for_dns(), que ja tinha esse cuidado). Em boot frio,
-+#    se o autostart do compositor dispara antes da rede terminar de
-+#    subir, isso matava o processo de sessao pra sempre (nao volta
-+#    sozinho). Agora tenta por ate ~15 segundos antes de desistir.
-+#
-+# 5. xprop_set()/xprop_get()/xprop_unset(): guardavam PIDs (wayvnc,
-+#    socat, screen-locker) como propriedades da janela raiz do X. Em
-+#    Wayland puro (sem Xwayland/xprop) nada era gravado, entao nada era
-+#    encerrado depois. Agora, com $WAYLAND_DISPLAY definido, cada valor
-+#    vira um arquivo em $XDG_RUNTIME_DIR/epoptes-client/. Em X11 o
-+#    comportamento continua o original.
-+#
-+# 6. ping(): em sessao de usuario, testava se o X estava vivo com xprop
-+#    e chamava die "No X" se falhasse - em Wayland puro isso derrubava
-+#    a conexao de sessao no primeiro ping. Agora, com $WAYLAND_DISPLAY
-+#    definido, testa se o socket do compositor ainda existe. Em X11
-+#    continua com xprop, como no original.
-+#
-+# 7. wayland_reverse_vnc(): quando o socat termina (o servidor fechou o
-+#    Observar/Assistir), o wayvnc daquela sessao e encerrado junto, como
-+#    o x11vnc -connect_or_exit faz. E o wayvnc usa um socket de controle
-+#    proprio (-S), para nao colidir com um wayvnc que o usuario ja tenha
-+#    aberto ("Another wayvnc process is already running"), e uma
-+#    configuracao vazia propria (-C), para nao herdar senha/erros do
-+#    ~/.config/wayvnc/config do usuario. Com wayvnc >= 0.10 usa tambem
-+#    -e (--exit-on-disconnect), detectado pelo --help.
-+# ============================================================================
- 
- # Dash handles signals a bit differently from bash.
- # We need to trap both 0 and 15 otherwise the trap function isn't called at all.
-@@ -60,16 +121,51 @@ ensure_display() {
-     fi
- }
- 
-+# VoidBR patch: diretorio de estado para sessoes Wayland, onde nao existe
-+# janela raiz do X para guardar propriedades. Um arquivo por variavel.
-+wayland_state_dir() {
-+    local dir
-+
-+    dir="${XDG_RUNTIME_DIR:-/tmp}/epoptes-client"
-+    test -n "$XDG_RUNTIME_DIR" || dir="/tmp/epoptes-client-$UID"
-+    mkdir -p "$dir" 2>/dev/null && chmod 700 "$dir" 2>/dev/null
-+    echo "$dir"
-+}
-+
-+# VoidBR patch: testa se o compositor Wayland desta sessao ainda esta de pe
-+# (o socket $WAYLAND_DISPLAY some quando o compositor encerra).
-+wayland_alive() {
-+    local sock
-+
-+    case "$WAYLAND_DISPLAY" in
-+    /*) sock=$WAYLAND_DISPLAY ;;
-+    *) sock="${XDG_RUNTIME_DIR:-/run/user/$UID}/$WAYLAND_DISPLAY" ;;
-+    esac
-+    test -S "$sock"
-+}
-+
- xprop_set() {
-+    if [ -n "$WAYLAND_DISPLAY" ]; then
-+        echo "$2" >"$(wayland_state_dir)/$1"
-+        return
-+    fi
-     xprop -root -f "$1" 8u -set "$1" "$2"
- }
- 
- xprop_get() {
-+    if [ -n "$WAYLAND_DISPLAY" ]; then
-+        cat "$(wayland_state_dir)/$1" 2>/dev/null
-+        return 0
-+    fi
-     # xprop -root UNSET_VAR echoes an error message to stdout instead of stderr
-     xprop -root "$1" 2>/dev/null | sed 's/^[^=]*//;s/^= "//;s/"$//;s/\\"/"/'
- }
- 
- xprop_unset() {
-+    if [ -n "$WAYLAND_DISPLAY" ]; then
-+        rm -f "$(wayland_state_dir)/$1"
-+        return 0
-+    fi
-     xprop -root -remove "$1"
- }
- 
-@@ -139,14 +235,32 @@ info() {
-         else
-             server_ip=$(getent hosts "$SERVER" | awk '{ print $1; exit }')
-             server_ip=${server_ip:-$SERVER}
--            read -r def_iface IP <<EOF
--$(ip route get "$server_ip" | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
-+
-+            # VoidBR patch: em boot frio, a rede (rota padrao/DHCP) pode
-+            # ainda nao estar de pe quando esta funcao roda pela primeira
-+            # vez (ex: autostart do compositor disparando antes da rede
-+            # terminar de subir). Em vez de morrer de cara, espera um
-+            # pouco e tenta de novo, no mesmo espirito do wait_for_dns()
-+            # que ja existe pra resolucao de nome.
-+            net_retry=0
-+            while :; do
-+                read -r def_iface IP <<EOF
-+$(ip route get "$server_ip" 2>/dev/null | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
- EOF
--            test "${def_iface:-lo}" != "lo" || read -r def_iface IP <<EOF
--$(ip route get 192.168.67.0 | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
-+                test "${def_iface:-lo}" != "lo" || read -r def_iface IP <<EOF
-+$(ip route get 192.168.67.0 2>/dev/null | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
- EOF
--            test "${def_iface:-lo}" != "lo" || die "Empty def_iface"
--            test -n "$IP" || die "Empty IP"
-+                if [ "${def_iface:-lo}" != "lo" ] && [ -n "$IP" ]; then
-+                    break
-+                fi
-+                net_retry=$((net_retry + 1))
-+                if [ "$net_retry" -ge 15 ]; then
-+                    test "${def_iface:-lo}" != "lo" || die "Empty def_iface"
-+                    test -n "$IP" || die "Empty IP"
-+                fi
-+                sleep 1
-+            done
-+
-             MAC=$(main_mac)
-             MAC=${MAC%% *}
-             test -n "$MAC" || die "Empty MAC"
-@@ -260,9 +374,11 @@ shutdown() {
- # $2 = thumbshot height.
- thumbshot() {
-     # TODO: remove compatibility fallback after a few versions
-+    # VoidBR patch: thumbshot.py agora sabe capturar em Wayland
-+    # (grim/gdbus/spectacle), entao nao pulamos mais o thumbshot
-+    # so por causa de WAYLAND_DISPLAY estar definido.
-     local executable
- 
--    test -z "$WAYLAND_DISPLAY" || return 0
-     if [ -f "./thumbshot.py" ]; then
-         executable=./thumbshot.py
-     else
-@@ -378,11 +494,103 @@ message() {
-     fi
- }
- 
-+# Cria uma "conexao reversa" para um servidor VNC que so sabe escutar
-+# (como o wayvnc), replicando o que x11vnc -connect_or_exit faz nativamente:
-+# o wayvnc sobe escutando so em localhost, e o socat disca pro servidor
-+# (equivalente a "$1" = host:porta do Epoptes) fazendo o bridge dos bytes.
-+# Parametros:
-+# $1 = host:port do servidor (o "${GUI_IP}:porta" que o Epoptes manda).
-+# $2 = "viewonly" (observar, sem controlar) ou "assist" (com controle).
-+wayland_reverse_vnc() {
-+    local target="$1" mode="$2" wport wpid spid old_pid ctl cfg exitopt
-+
-+    if ! command -v wayvnc >/dev/null 2>&1; then
-+        echo "wayland_reverse_vnc: wayvnc nao encontrado, instale o pacote wayvnc" >&5
-+        return 1
-+    fi
-+    if ! command -v socat >/dev/null 2>&1; then
-+        echo "wayland_reverse_vnc: socat nao encontrado" >&5
-+        return 1
-+    fi
-+
-+    # Ao contrario do x11vnc -connect_or_exit (que sai sozinho assim que
-+    # a conexao cai), o wayvnc fica escutando pra sempre depois que a
-+    # sessao termina. Sem isso, cada nova tentativa de Observar/Assistir
-+    # deixava mais uma instancia zumbi pra tras, competindo pelo mesmo
-+    # recurso de captura de tela do compositor - normalmente so uma
-+    # sessao de wlr-screencopy e permitida por vez, entao a segunda
-+    # instancia falhava silenciosamente (background() nao verifica se o
-+    # processo realmente conseguiu comecar a escutar). Por isso sempre
-+    # matamos qualquer sessao anterior antes de abrir uma nova.
-+    ensure_display
-+    old_pid=$(xprop_get EPOPTES_WAYVNC_PID)
-+    test -z "$old_pid" || kill "$old_pid" 2>/dev/null
-+    old_pid=$(xprop_get EPOPTES_VNCVIEWER_PID)
-+    test -z "$old_pid" || kill "$old_pid" 2>/dev/null
-+
-+    # Porta livre em localhost, escolhida pelo proprio kernel (porta 0).
-+    wport=$(python3 -c '
-+import socket
-+s = socket.socket()
-+s.bind(("127.0.0.1", 0))
-+print(s.getsockname()[1])
-+s.close()
-+' 2>/dev/null)
-+    if [ -z "$wport" ]; then
-+        echo "wayland_reverse_vnc: nao consegui escolher uma porta livre" >&5
-+        return 1
-+    fi
-+
-+    # -R (--disable-resizing): impede o wayvnc de tentar redimensionar
-+    # a saida automaticamente para bater com o cliente VNC. Em placas
-+    # mais antigas (driver "radeon", por exemplo) o kernel pode recusar
-+    # esse modo customizado ("[drm] User-defined mode not supported"),
-+    # o que derruba a saida no meio da sessao ("Selected output ...
-+    # went away" no log do wayvnc).
-+    # -S: socket de controle proprio. Sem isso o wayvnc usa o padrao
-+    # ($XDG_RUNTIME_DIR/wayvncctl) e aborta com "Another wayvnc process is
-+    # already running" se o usuario ja tiver um wayvnc aberto.
-+    ctl="$(wayland_state_dir)/wayvncctl"
-+    # -C: configuracao vazia propria. Sem isso o wayvnc le
-+    # ~/.config/wayvnc/config do usuario; se ali tiver enable_auth=true o
-+    # visualizador do Epoptes (sem senha) nao conecta, e se o arquivo
-+    # tiver erro o wayvnc nem sobe.
-+    cfg="$(wayland_state_dir)/wayvnc.config"
-+    : >"$cfg"
-+    # -e (--exit-on-disconnect, wayvnc >= 0.10): o proprio wayvnc encerra
-+    # quando o servidor fecha a conexao. Versoes antigas nao tem a opcao;
-+    # nelas o relay abaixo e quem encerra o wayvnc.
-+    exitopt=""
-+    if wayvnc --help 2>&1 | grep -q -- --exit-on-disconnect; then
-+        exitopt="-e"
-+    fi
-+    if [ "$mode" = viewonly ]; then
-+        wpid=$(background -p wayvnc -C "$cfg" -S "$ctl" $exitopt -d -R 127.0.0.1 "$wport")
-+    else
-+        wpid=$(background -p wayvnc -C "$cfg" -S "$ctl" $exitopt -R 127.0.0.1 "$wport")
-+    fi
-+
-+    # Da um tempo pro wayvnc comecar a escutar antes do socat tentar.
-+    sleep 0.3
-+
-+    # Quando o socat termina (servidor fechou o Observar/Assistir), encerra
-+    # o wayvnc desta sessao, como o x11vnc -connect_or_exit faria sozinho.
-+    spid=$(background -p sh -c 'socat "TCP:$1" "TCP:127.0.0.1:$2"; kill "$3" 2>/dev/null' \
-+        epoptes-vnc-relay "$target" "$wport" "$wpid")
-+
-+    xprop_set EPOPTES_WAYVNC_PID "$wpid"
-+    xprop_set EPOPTES_VNCVIEWER_PID "$spid"
-+}
-+
- # Connect to the server to be monitored.
- # Parameters:
- # $1 = host:port.
- get_monitored() {
--    background x11vnc -q -nopw -noshm -24to32 -viewonly -connect_or_exit "$1"
-+    if [ -n "$WAYLAND_DISPLAY" ]; then
-+        wayland_reverse_vnc "$1" viewonly
-+    else
-+        background x11vnc -q -nopw -noshm -24to32 -viewonly -connect_or_exit "$1"
-+    fi
- }
- 
- # Connect to the server to get assistance.
-@@ -390,7 +598,11 @@ get_monitored() {
- # $1 = host:port.
- # $2 = grab keyboard and mouse.
- get_assisted() {
--    background x11vnc -q -nopw -noshm -24to32 ${2:+-grabptr -grabkbd} -connect_or_exit "$1"
-+    if [ -n "$WAYLAND_DISPLAY" ]; then
-+        wayland_reverse_vnc "$1" assist
-+    else
-+        background x11vnc -q -nopw -noshm -24to32 ${2:+-grabptr -grabkbd} -connect_or_exit "$1"
-+    fi
- }
- 
- # Deactivate the screensaver, in order for the users to watch a broadcast.
-@@ -468,7 +680,7 @@ receive_broadcast() {
- # The vnc clients should automatically exit when the server is killed.
- # Unfortunately, that isn't always true, so try to kill them anyway.
- stop_receptions() {
--    local pid
-+    local pid wpid
- 
-     unset receiving_broadcast
-     ensure_display
-@@ -477,6 +689,11 @@ stop_receptions() {
-         kill "$pid"
-         xprop_unset EPOPTES_VNCVIEWER_PID
-     fi
-+    wpid=$(xprop_get EPOPTES_WAYVNC_PID)
-+    if [ -n "$wpid" ]; then
-+        kill "$wpid"
-+        xprop_unset EPOPTES_WAYVNC_PID
-+    fi
- }
- 
- # Open a root terminal inside the X session.
-@@ -507,7 +724,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
- # exit automatically, so tell it to exit as soon as X is unavailable.
- ping() {
-     if [ "$UID" -gt 0 ]; then
--        xprop -root -f EPOPTES_CLIENT 32c -set EPOPTES_CLIENT $$ || die "No X"
-+        # VoidBR patch: em Wayland puro nao ha X para o xprop testar; ve se
-+        # o compositor desta sessao ainda esta de pe. Em X11, o original.
-+        if [ -n "$WAYLAND_DISPLAY" ]; then
-+            wayland_alive || die "No Wayland"
-+        else
-+            xprop -root -f EPOPTES_CLIENT 32c -set EPOPTES_CLIENT $$ || die "No X"
-+        fi
-     fi
-     if [ "$receiving_broadcast" = true ]; then
-         reset_screensaver

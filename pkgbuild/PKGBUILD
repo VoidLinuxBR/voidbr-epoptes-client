@@ -10,38 +10,39 @@ arch=(any)
 url="https://github.com/voidlinuxbr/${_reponame}"
 license=(GPL-3.0-or-later)
 depends=(
+	dbus
 	gobject-introspection
 	grim
 	gtk3
 	iperf
 	iproute2
-	libfaketime
-	libnotify
 	librsvg
-	notification-daemon
 	openssl
+	procps-ng
 	python
 	python-cairo
-	python-dbus
 	python-gobject
-	python-netifaces
 	python-pillow
-	python-pyopenssl
-	python-service-identity
-	python-twisted
+	screen
 	socat
 	spectacle
 	tigervnc
 	wayvnc
 	x11vnc
+	xorg-xprop
+	xorg-xset
+	xorg-xwininfo
 	xterm
 )
 makedepends=(git patch)
+# So o que o lado cliente usa (base: debian/control do Epoptes oficial, mais
+# o suporte a Wayland). Twisted, netifaces, pyOpenSSL, libfaketime e
+# notification-daemon sao do servidor e sairam daqui.
 # grim      -> thumbshots em Hyprland/Sway/river/labwc (wlroots)
 # wayvnc    -> observar/assistir (duplo-clique) em Hyprland/Sway/wlroots
 # spectacle -> thumbshots em KDE Plasma Wayland
 # GNOME nao precisa de pacote extra: usa gdbus, que ja vem com glib.
-# Ficam como dependencia obrigatoria, como no pacote Void.
+# xorg-xprop/xset/xwininfo, x11vnc, tigervnc e xterm -> sessoes X11.
 provides=(epoptes-client)
 conflicts=(epoptes-client)
 backup=(etc/default/epoptes-client)
@@ -59,7 +60,7 @@ source=(
 )
 sha256sums=(
 	'SKIP'
-	'ddd5cb71a9fdd1e555c371f8835f6ad4ca91c80bfc2de239227e56d93d0e36d0'
+	'65a608ad84affd2321588a56b8e1a7c55e391416c63e8be3fde817ef5314f69e'
 )
 
 pkgver() {
@@ -69,15 +70,16 @@ pkgver() {
 
 prepare() {
 	cd "$pkgname"
-	# VoidBR patch (mesmo do pacote Void): suporte a Wayland
-	# - thumbshots: grim (wlroots) / gdbus+Shell.Screenshot (GNOME) /
-	#   spectacle (KDE). O caminho X11 original permanece intocado.
-	# - observar/assistir (duplo-clique): wayvnc + socat fazendo o papel
-	#   de "conexao reversa" (so Hyprland/Sway/wlroots por enquanto).
-	# - Wayland puro (sem Xwayland/xprop): PIDs em arquivo em
-	#   $XDG_RUNTIME_DIR/epoptes-client/ e ping() testando o socket do
-	#   compositor. Em X11 nada muda.
-	# - gui.py: fix Python 3.14 (modulo "pipes" removido, virou "shlex").
+	# VoidBR patch (o mesmo do pacote Void, gerado com ./gera-patch.sh):
+	# - thumbshot.py: miniaturas em Wayland - grim (wlroots) /
+	#   gdbus+Shell.Screenshot (GNOME) / spectacle (KDE). O caminho X11
+	#   original permanece intocado.
+	# - epoptes-client --check: diagnostico (arquivos, nome do servidor,
+	#   certificado, conexoes e miniatura).
+	# - epoptes-client: avisa no log quando o certificado do servidor mudou
+	#   e nao desiste mais quando o nome do servidor ainda nao resolve.
+	# O client-functions (observar/assistir em Wayland) vem do SERVIDOR na
+	# conexao; esse e o patch do pacote chili-epoptes.
 	patch -p1 < "$srcdir/voidbr-epoptes-client.patch"
 }
 

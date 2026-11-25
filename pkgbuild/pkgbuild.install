@@ -68,6 +68,8 @@ post_install() {
     msg "e busque o certificado dele: ${yellow}sudo epoptes-client -c"
     msg "Depois inicie o cliente: ${yellow}sudo systemctl start epoptes-client"
     msg "Encerre a sessão e entre novamente para valer o grupo 'epoptes'."
+    msg "Se algo não funcionar, rode ${yellow}epoptes-client --check${reset} como usuário,"
+    msg "num terminal da sessão gráfica, para ver o diagnóstico."
   fi
 
   sh_finish
@@ -76,4 +78,52 @@ post_install() {
 post_upgrade() {
   IS_UPGRADE=true
   post_install
+}
+
+# Modelo Chili: o post_install copia /usr/share/${pkgname}/{usr,etc,opt} para /,
+# e essas copias nao pertencem ao pacman - o pacman -R so apagaria
+# /usr/share/${pkgname}. Antes da remocao, apaga as copias, exceto as que
+# pertencem a outro pacote do pacman ou que outro pacote no modelo Chili tambem
+# copia (por exemplo, as traducoes compartilhadas entre servidor e cliente).
+sh_remove_copied_files() {
+  local stage="/usr/share/${pkgname}" rel other shared dir
+  [[ -d $stage ]] || return 0
+  msg "Removendo os arquivos copiados para / ..."
+  while IFS= read -r -d '' rel; do
+    rel=${rel#"$stage"}
+    [[ -e $rel || -L $rel ]] || continue
+    pacman -Qoq "$rel" &>/dev/null && continue
+    shared=false
+    for other in /usr/share/*/; do
+      [[ ${other%/} = "$stage" ]] && continue
+      if [[ -e ${other%/}$rel ]]; then
+        shared=true
+        break
+      fi
+    done
+    $shared || rm -f "$rel"
+  done < <(find "$stage/usr" "$stage/etc" "$stage/opt" -type f -print0 2>/dev/null)
+  # Pastas que ficaram vazias (das mais fundas para as mais rasas), menos as
+  # que pertencem a algum pacote do pacman.
+  while IFS= read -r dir; do
+    dir=${dir#"$stage"}
+    [[ -d $dir ]] || continue
+    pacman -Qoq "$dir/" &>/dev/null && continue
+    rmdir "$dir" 2>/dev/null
+  done < <(find "$stage/usr" "$stage/etc" "$stage/opt" -mindepth 1 -type d 2>/dev/null | sort -r)
+}
+
+pre_remove() {
+  [[ $IS_VERBOSE = true ]] && sh_init || { sh_init 2>/dev/null || true; }
+  if [[ -d /run/systemd/system ]]; then
+    systemctl disable --now epoptes-client &>/dev/null || true
+  fi
+  sh_remove_copied_files
+}
+
+post_remove() {
+  if [[ -d /run/systemd/system ]]; then
+    systemctl daemon-reload &>/dev/null || true
+  fi
+  msg "O grupo 'epoptes' e o /etc/epoptes foi mantido."
 }
