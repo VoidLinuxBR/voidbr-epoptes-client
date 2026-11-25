@@ -35,13 +35,19 @@ depends=(
 	xterm
 )
 makedepends=(git patch)
+optdepends=(
+	'gnome-remote-desktop: observar/assistir em GNOME com Wayland'
+	'libsecret: secret-tool, senha do observar/assistir em GNOME'
+	'xdg-desktop-portal-gnome: thumbshots em GNOME com Wayland'
+)
 # So o que o lado cliente usa (base: debian/control do Epoptes oficial, mais
 # o suporte a Wayland). Twisted, netifaces, pyOpenSSL, libfaketime e
 # notification-daemon sao do servidor e sairam daqui.
 # grim      -> thumbshots em Hyprland/Sway/river/labwc (wlroots)
 # wayvnc    -> observar/assistir (duplo-clique) em Hyprland/Sway/wlroots
 # spectacle -> thumbshots em KDE Plasma Wayland
-# GNOME nao precisa de pacote extra: usa gdbus, que ja vem com glib.
+# GNOME com Wayland: pacotes do proprio GNOME, em optdepends (pesados e
+# so uteis em clientes GNOME; sem eles o servidor avisa).
 # xorg-xprop/xset/xwininfo, x11vnc, tigervnc e xterm -> sessoes X11.
 provides=(epoptes-client)
 conflicts=(epoptes-client)
@@ -60,7 +66,7 @@ source=(
 )
 sha256sums=(
 	'SKIP'
-	'7a1a974ef625da3fdd172afeed2ff395d006eaa69edeaf74cca1713705279734'
+	'4ee77b8a1bf392343f8a8afcf358cb1699414eb3b25c07ca1459665c921d0829'
 )
 
 pkgver() {
@@ -72,7 +78,7 @@ prepare() {
 	cd "$pkgname"
 	# VoidBR patch (o mesmo do pacote Void, gerado com ./gera-patch.sh):
 	# - thumbshot.py: miniaturas em Wayland - grim (wlroots) /
-	#   gdbus+Shell.Screenshot (GNOME) / spectacle (KDE). O caminho X11
+	#   portal de captura (GNOME) / spectacle (KDE). O caminho X11
 	#   original permanece intocado.
 	# - epoptes-client --check: diagnostico (arquivos, nome do servidor,
 	#   certificado, conexoes e miniatura).

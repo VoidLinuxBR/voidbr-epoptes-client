@@ -308,10 +308,10 @@ index 7a2ee2a..a014d6d 100755
  # (for standalone workstations booted before the server).
  if [ -s "$servercrt" ] || [ "$cert_param" = "verify=0" ]; then
 diff --git a/usr/share/epoptes-client/thumbshot.py b/usr/share/epoptes-client/thumbshot.py
-index 557829c..9c11049 100755
+index 557829c..eeadacc 100755
 --- a/usr/share/epoptes-client/thumbshot.py
 +++ b/usr/share/epoptes-client/thumbshot.py
-@@ -4,38 +4,204 @@
+@@ -4,38 +4,269 @@
  # SPDX-License-Identifier: GPL-3.0-or-later
  """
  Create a thumbshot of the current screen.
@@ -327,9 +327,14 @@ index 557829c..9c11049 100755
 +  - wlroots (Hyprland, Sway, river, labwc...): grim, via protocolo
 +    wlr-screencopy. Detectado como padrao quando XDG_CURRENT_DESKTOP
 +    nao indica GNOME nem KDE.
-+  - GNOME: gdbus call em org.gnome.Shell.Screenshot (interface D-Bus
-+    privada do Shell, nao o portal sandboxed - por isso nao pede
-+    permissao a cada chamada).
++  - GNOME: portal de captura (org.freedesktop.portal.Screenshot, nao
++    interativo). Desde o GNOME 41 o Shell recusa a interface privada
++    org.gnome.Shell.Screenshot a programas de fora (AccessDenied), entao o
++    portal e o caminho. Ele pede ao usuario, uma vez so, permissao para
++    capturas "a qualquer momento", e a escolha fica gravada. Precisa do
++    xdg-desktop-portal-gnome, e de nenhum portals.conf do usuario mandando o
++    GNOME para outro backend. A interface privada do Shell continua como
++    reserva, para GNOME antigo.
 +  - KDE Plasma: spectacle -b -n -o <arquivo> (modo background, fala
 +    com o KWin internamente).
 +
@@ -381,8 +386,64 @@ index 557829c..9c11049 100755
 +    subprocess.run(["grim", png_path], check=True, timeout=10)
 +
 +
++def _capture_gnome_portal(png_path, espera=20):
++    """GNOME 41+: portal de captura de tela, sem dialogo (nao interativo)."""
++    import gi
++    gi.require_version("Gio", "2.0")
++    from gi.repository import Gio, GLib
++
++    portal = "org.freedesktop.portal.Desktop"
++    caminho = "/org/freedesktop/portal/desktop"
++    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
++    remetente = bus.get_unique_name()[1:].replace(".", "_")
++    token = "epoptes_%d" % os.getpid()
++    pedido = "%s/request/%s/%s" % (caminho, remetente, token)
++    loop = GLib.MainLoop()
++    resultado = {}
++
++    def resposta(_con, _rem, _cam, _iface, _sinal, params):
++        resultado["codigo"], extras = params.unpack()
++        resultado["uri"] = extras.get("uri", "")
++        loop.quit()
++
++    # Assina a resposta antes de pedir, para nao perde-la
++    sub = bus.signal_subscribe(portal, "org.freedesktop.portal.Request",
++                               "Response", pedido, None,
++                               Gio.DBusSignalFlags.NONE, resposta)
++    try:
++        bus.call_sync(
++            portal, caminho, "org.freedesktop.portal.Screenshot", "Screenshot",
++            GLib.Variant("(sa{sv})", ("", {
++                "handle_token": GLib.Variant("s", token),
++                "interactive": GLib.Variant("b", False)})),
++            GLib.VariantType("(o)"), Gio.DBusCallFlags.NONE, 10000, None)
++    except GLib.Error as erro:
++        bus.signal_unsubscribe(sub)
++        if "portal.Screenshot" in erro.message:
++            raise RuntimeError(
++                "o portal nao oferece captura de tela: instale o "
++                "xdg-desktop-portal-gnome e veja se um "
++                "~/.config/xdg-desktop-portal/portals.conf nao manda o "
++                "GNOME para outro backend") from None
++        raise RuntimeError("portal: %s" % erro.message) from None
++    GLib.timeout_add_seconds(espera, loop.quit)
++    loop.run()
++    bus.signal_unsubscribe(sub)
++    if "codigo" not in resultado:
++        raise RuntimeError(
++            "o portal nao respondeu em %d s (pedido de permissao "
++            "esperando na tela?)" % espera)
++    if resultado["codigo"] != 0 or not resultado["uri"]:
++        raise RuntimeError(
++            "o portal recusou a captura (permissao negada? ela pode ser "
++            "liberada em Configuracoes > Privacidade)")
++    # O portal salva numa pasta do usuario; move para o diretorio
++    # temporario, que e apagado depois, para nao acumular capturas
++    shutil.move(Gio.File.new_for_uri(resultado["uri"]).get_path(), png_path)
++
++
 +def _capture_gnome(png_path):
-+    """GNOME/Mutter via a interface D-Bus privada do Shell (sem portal)."""
++    """GNOME antigo (antes do 41): interface D-Bus privada do Shell."""
 +    if not _which("gdbus"):
 +        raise RuntimeError("gdbus nao encontrado (necessario para GNOME)")
 +    subprocess.run(
@@ -436,7 +497,8 @@ index 557829c..9c11049 100755
 +    desktop = _detect_desktop()
 +    order = {
 +        "wlroots": [_capture_wlroots, _capture_gnome, _capture_kde],
-+        "gnome": [_capture_gnome, _capture_wlroots, _capture_kde],
++        "gnome": [_capture_gnome_portal, _capture_gnome, _capture_wlroots,
++                  _capture_kde],
 +        "kde": [_capture_kde, _capture_wlroots, _capture_gnome],
 +    }[desktop]
 +
@@ -449,9 +511,12 @@ index 557829c..9c11049 100755
 +        except Exception as exc:  # noqa: BLE001
 +            errors.append(f"{method.__name__}: {exc}")
 +
-+    raise RuntimeError(
-+        "Nenhum metodo de captura Wayland funcionou: " + " | ".join(errors)
-+    )
++    # Na dica do servidor cabe pouco: o motivo do metodo principal deste
++    # ambiente; os outros so no stderr (log do cliente).
++    print("Nenhum metodo de captura Wayland funcionou: " + " | ".join(errors),
++          file=sys.stderr)
++    raise RuntimeError(errors[0].split(": ", 1)[-1] if errors else
++                       "nenhum metodo de captura Wayland funcionou")
 +
 +
 +def thumbshot_wayland(width, height):
