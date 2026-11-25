@@ -1,5 +1,5 @@
 diff --git a/usr/sbin/epoptes-client b/usr/sbin/epoptes-client
-index 7a2ee2a..82d3645 100755
+index 7a2ee2a..437f092 100755
 --- a/usr/sbin/epoptes-client
 +++ b/usr/sbin/epoptes-client
 @@ -9,8 +9,10 @@
@@ -36,7 +36,7 @@ index 7a2ee2a..82d3645 100755
          fi
          if [ "$delay" -eq 5 ]; then
              echo "Cannot resolve $SERVER, will keep retrying."
-@@ -164,6 +172,121 @@ EOF
+@@ -164,6 +172,146 @@ EOF
      fi
  }
  
@@ -80,7 +80,7 @@ index 7a2ee2a..82d3645 100755
 +
 +# VoidBR patch: epoptes-client --check, diagnostico em uma saida so.
 +run_check() {
-+    local dir missing f remote conns users err
++    local dir missing f remote conns err me procs summary mypids mycount
 +
 +    check_failures=0
 +    dir=/usr/share/epoptes-client
@@ -124,14 +124,39 @@ index 7a2ee2a..82d3645 100755
 +        check_ok "o servidor responde e o certificado confere"
 +    fi
 +
++    # Cada conexao do epoptes-client e um processo socat. Ele existe mesmo
++    # enquanto ainda tenta conectar (tenta de novo a cada 60 s), por isso
++    # conta os processos, e nao so as conexoes ja estabelecidas.
++    me=$(id -un)
++    procs=$(ps --sort=start_time -eo user:32=,pid=,args= |
++        grep "[o]penssl-connect:$SERVER:$PORT")
++    summary=$(echo "$procs" | awk 'NF { c[$1]++ }
++        END { for (u in c) printf "%s(%d) ", u, c[u] }')
 +    conns=$(ss -Htn state established "( dport = :$PORT )" 2>/dev/null | wc -l)
-+    users=$(ps -eo user=,args= | grep "openssl-connect:" | grep -v grep |
-+        awk '{ print $1 }' | sort -u | tr '\n' ' ')
-+    if [ "${conns:-0}" -gt 0 ]; then
-+        check_ok "$conns conexao(oes) estabelecida(s); processos de: ${users:-?}"
++    echo "  [INFO]  processos por usuario: ${summary:-nenhum}; conexoes estabelecidas: $conns"
++    mypids=$(echo "$procs" | awk -v u="$me" '$1 == u { print $2 }')
++    mycount=$(echo "$mypids" | grep -c .)
++    if [ "$mycount" -eq 0 ]; then
++        if [ "$UID" -eq 0 ]; then
++            check_fail "nenhum processo epoptes-client do root" \
++                "reinicie o servico epoptes-client"
++        else
++            check_fail "nenhum processo epoptes-client da sua sessao ($me)" \
++                "encerre a sessao e entre de novo, ou rode: epoptes-client &"
++        fi
++    elif [ "$mycount" -gt 1 ]; then
++        # O mais antigo vem primeiro (--sort=start_time); os outros sobram.
++        check_fail "$mycount processos epoptes-client de $me (duplicados)" \
++            "mantenha o mais antigo e encerre os outros: kill $(echo "$mypids" | tail -n +2 | tr '\n' ' ')"
 +    else
-+        check_fail "nenhuma conexao estabelecida com $SERVER:$PORT" \
-+            "veja os itens acima; o root conecta pelo servico, o usuario pelo login"
++        # ss -p so mostra o PID dos proprios processos, o que basta aqui.
++        if ss -Htnp state established "( dport = :$PORT )" 2>/dev/null |
++            grep -q "pid=$mypids,"; then
++            check_ok "a conexao de $me esta estabelecida (PID $mypids)"
++        else
++            check_fail "o processo de $me (PID $mypids) ainda nao conectou" \
++                "ele tenta de novo a cada 60 s; aguarde e rode o --check de novo"
++        fi
 +    fi
 +
 +    if [ "$UID" -eq 0 ]; then
@@ -158,7 +183,7 @@ index 7a2ee2a..82d3645 100755
  # Main.
  version
  
-@@ -185,6 +308,10 @@ case "$1" in
+@@ -185,6 +333,10 @@ case "$1" in
      need_certificate=true
      shift
      ;;
@@ -169,7 +194,7 @@ index 7a2ee2a..82d3645 100755
  esac
  
  # Set a reasonable PATH to execute commands or to relaunch epoptes-client.
-@@ -209,6 +336,8 @@ export "PORT=${2:-$PORT}"
+@@ -209,6 +361,8 @@ export "PORT=${2:-$PORT}"
  test -n "$need_certificate" && fetch_certificate
  
  servercrt=/etc/epoptes/server.crt
@@ -178,7 +203,7 @@ index 7a2ee2a..82d3645 100755
  # Don't launch as root on epoptes servers, unless there's a main server
  if [ "$UID" -eq 0 ] && [ $TYPE = "standalone" ] && [ -x /usr/bin/epoptes ]; then
      if [ -s /etc/epoptes/main-server.crt ]; then
-@@ -270,6 +399,12 @@ else
+@@ -270,6 +424,12 @@ else
      cert_param="verify=0"
  fi
  

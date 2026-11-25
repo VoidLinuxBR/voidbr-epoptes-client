@@ -15,7 +15,7 @@ license=(GPL3)
 arch=(any)
 sha256sums=(
 	'SKIP'
-	'65a608ad84affd2321588a56b8e1a7c55e391416c63e8be3fde817ef5314f69e'
+	'b42b83a5fc8bfc26c6a40d50024ffb30ad32fb8ac1d85d6e77ccd2c8c1cb04f0'
 )
 depends=(
 	dbus
