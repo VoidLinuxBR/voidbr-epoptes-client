@@ -1,5 +1,5 @@
 diff --git a/usr/sbin/epoptes-client b/usr/sbin/epoptes-client
-index 7a2ee2a..437f092 100755
+index 7a2ee2a..09d20fe 100755
 --- a/usr/sbin/epoptes-client
 +++ b/usr/sbin/epoptes-client
 @@ -9,8 +9,10 @@
@@ -36,7 +36,7 @@ index 7a2ee2a..437f092 100755
          fi
          if [ "$delay" -eq 5 ]; then
              echo "Cannot resolve $SERVER, will keep retrying."
-@@ -164,6 +172,146 @@ EOF
+@@ -164,6 +172,152 @@ EOF
      fi
  }
  
@@ -128,13 +128,16 @@ index 7a2ee2a..437f092 100755
 +    # enquanto ainda tenta conectar (tenta de novo a cada 60 s), por isso
 +    # conta os processos, e nao so as conexoes ja estabelecidas.
 +    me=$(id -un)
-+    procs=$(ps --sort=start_time -eo user:32=,pid=,args= |
-+        grep "[o]penssl-connect:$SERVER:$PORT")
++    procs=$(ps --sort=start_time -C socat -o user:32=,pid=,tty=,args= |
++        grep "openssl-connect:$SERVER:$PORT")
 +    summary=$(echo "$procs" | awk 'NF { c[$1]++ }
 +        END { for (u in c) printf "%s(%d) ", u, c[u] }')
 +    conns=$(ss -Htn state established "( dport = :$PORT )" 2>/dev/null | wc -l)
 +    echo "  [INFO]  processos por usuario: ${summary:-nenhum}; conexoes estabelecidas: $conns"
-+    mypids=$(echo "$procs" | awk -v u="$me" '$1 == u { print $2 }')
++    # Os que nao estao presos a um terminal (tty "?", vindos do login/servico)
++    # vem primeiro; entre eles, o mais antigo. O primeiro e o que fica.
++    mypids=$(echo "$procs" | awk -v u="$me" '$1 == u { print ($3 == "?" ? 0 : 1), $2 }' |
++        sort -s -k1,1n | awk '{ print $2 }')
 +    mycount=$(echo "$mypids" | grep -c .)
 +    if [ "$mycount" -eq 0 ]; then
 +        if [ "$UID" -eq 0 ]; then
@@ -142,12 +145,15 @@ index 7a2ee2a..437f092 100755
 +                "reinicie o servico epoptes-client"
 +        else
 +            check_fail "nenhum processo epoptes-client da sua sessao ($me)" \
-+                "encerre a sessao e entre de novo, ou rode: epoptes-client &"
++                "encerre a sessao e entre de novo, ou rode: setsid -f epoptes-client"
 +        fi
 +    elif [ "$mycount" -gt 1 ]; then
-+        # O mais antigo vem primeiro (--sort=start_time); os outros sobram.
++        # Encerra o shell filho de cada socat extra com KILL: com kill comum
++        # (TERM), ou matando o proprio socat, o shell se reinicia sozinho
++        # (trap 0 15 no client-functions); e o QUIT e ignorado pelos que
++        # nasceram desse reinicio, que roda em segundo plano.
 +        check_fail "$mycount processos epoptes-client de $me (duplicados)" \
-+            "mantenha o mais antigo e encerre os outros: kill $(echo "$mypids" | tail -n +2 | tr '\n' ' ')"
++            "mantenha o PID $(echo "$mypids" | head -n 1) e encerre os outros: $(echo "$mypids" | tail -n +2 | sed 's/^/pkill -KILL -P /' | paste -sd ';' | sed 's/;/; /g')"
 +    else
 +        # ss -p so mostra o PID dos proprios processos, o que basta aqui.
 +        if ss -Htnp state established "( dport = :$PORT )" 2>/dev/null |
@@ -183,7 +189,7 @@ index 7a2ee2a..437f092 100755
  # Main.
  version
  
-@@ -185,6 +333,10 @@ case "$1" in
+@@ -185,6 +339,10 @@ case "$1" in
      need_certificate=true
      shift
      ;;
@@ -194,7 +200,7 @@ index 7a2ee2a..437f092 100755
  esac
  
  # Set a reasonable PATH to execute commands or to relaunch epoptes-client.
-@@ -209,6 +361,8 @@ export "PORT=${2:-$PORT}"
+@@ -209,6 +367,8 @@ export "PORT=${2:-$PORT}"
  test -n "$need_certificate" && fetch_certificate
  
  servercrt=/etc/epoptes/server.crt
@@ -203,7 +209,7 @@ index 7a2ee2a..437f092 100755
  # Don't launch as root on epoptes servers, unless there's a main server
  if [ "$UID" -eq 0 ] && [ $TYPE = "standalone" ] && [ -x /usr/bin/epoptes ]; then
      if [ -s /etc/epoptes/main-server.crt ]; then
-@@ -270,6 +424,12 @@ else
+@@ -270,6 +430,12 @@ else
      cert_param="verify=0"
  fi
  
